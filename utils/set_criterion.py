@@ -53,6 +53,12 @@ class SetCriterion(nn.Module):
                                     dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
+        if "n_boxes" in outputs:
+            n_boxes = outputs["n_boxes"]
+            seq_ix = torch.arange(n_boxes, device=n_boxes.device, dtype=n_boxes.dtype)
+            invalid = seq_ix.unsqueeze(0) >= n_boxes.unsqueeze(0)
+            target_classes = target_classes.masked_fill(invalid, -100)
+
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
         losses = {'loss_ce': loss_ce}
 
@@ -162,9 +168,6 @@ class SetCriterion(nn.Module):
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         num_boxes = sum(len(t["labels"]) for t in targets)
         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
-        # if is_dist_avail_and_initialized():
-        #     torch.distributed.all_reduce(num_boxes)
-        # num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
         num_boxes = torch.clamp(num_boxes / 1, min=1).item()
 
         # Compute all the requested losses
