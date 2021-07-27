@@ -1,4 +1,3 @@
-import logging
 from os.path import join, dirname
 
 DATA_DIR = "/Users/chris/data/"
@@ -30,7 +29,6 @@ GPV1_VOC = join(SOURCE_DIR, "vocab/vocab.json")
 GPV1_VOC_EMBED = join(SOURCE_DIR, "vocab/vocab_embed.npy")
 
 CLASSIFICATION = join(SOURCE_DIR, "coco_classification")
-IMAGE_DIR = join(SOURCE_DIR, "coco/images")
 
 VISUALIZATION_DIR = "/Users/chris/Desktop/gpv-visualize"
 

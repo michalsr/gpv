@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from torch import distributed as dist
 
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset
 from exp.ours.data.gpv_data import Task
@@ -1044,7 +1044,7 @@ class Trainer(FromParams):
             logging.info(f"{prefix} best model ({score:.5f} > {best_saved_score:.5f}) ep={epoch+1}")
           best_saved_score = score
           if run_dir:
-            best_model_file = join(run_dir, config.BEST_STATE_NAME)
+            best_model_file = join(run_dir, file_paths.BEST_STATE_NAME)
             torch.save(_base_model.state_dict(), best_model_file)
 
       if (run_dir is not None and

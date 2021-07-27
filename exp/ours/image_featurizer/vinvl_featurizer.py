@@ -12,7 +12,7 @@ import torchvision.ops
 from PIL import Image
 from attr import dataclass
 
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.data.gpv_data import GPVExample, Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater, get_box_targets, \
   ImageFeatureExtractor, \
@@ -129,7 +129,7 @@ class VinVLPrecomputedFeatures(ImageFeatureExtractor):
 
   def get_collate(self, is_train=False) -> 'ImageCollater':
     if self._collater is None:
-      src = join(config.VINVL_SOURCE, self.model, self.dataset)
+      src = join(file_paths.VINVL_SOURCE, self.model, self.dataset)
       self._collater = VinVLTSVReader(src)
     return VinVLPrecomputedFeaturesCollate(self._collater)
 
