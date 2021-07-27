@@ -67,9 +67,6 @@ class PretrainedDetrFeaturizer(ImageFeatureExtractor):
     self._freeze()
 
   def _load_from_state_dict(self, *args, **kwargs):
-    if self.detr is None:
-      self.detr = get_detr_model(
-        pretrained=False, load_object_classifier=self.full_classifier)
     super()._load_from_state_dict(*args, **kwargs)
     self._freeze()
 
@@ -98,7 +95,7 @@ class PretrainedDetrFeaturizer(ImageFeatureExtractor):
     boxes = out["pred_boxes"]
     if self.clip_boxes:
       # Detr can give us out-of-bound boxes, it is built so cx, cy, w, h are
-      # between 0 and 1, but that can lead to invalid x1 y1 x2 y2 coordinate0s
+      # between 0 and 1, but that can still lead to invalid x1 y1 x2 y2 coordinates
       c = torchvision.ops.box_convert(boxes.view(-1, 4), "cxcywh", "xyxy")
       c = torch.clip(c, 0.0, 1.0)
       boxes = torchvision.ops.box_convert(c, "xyxy", "cxcywh").view(*boxes.size())
@@ -108,6 +105,3 @@ class PretrainedDetrFeaturizer(ImageFeatureExtractor):
       out["detr_hs"].squeeze(0),
       out["pred_relevance_logits"]
     )
-
-  def get_pretrained_parameters(self):
-    return list(self.parameters())
