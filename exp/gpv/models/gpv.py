@@ -1,10 +1,8 @@
 import copy
 import math
-import nltk
 from nltk.tokenize import word_tokenize
 import torch
 import torch.nn as nn
-from transformers import BertTokenizer, BertModel
 
 from .detr import create_detr
 from .detr_roi_head import create_detr_roi_head
@@ -12,7 +10,9 @@ from .bert import Bert
 from .answer_head import build_answer_head
 from .vilbert import BertConnectionLayer
 from .losses import GPVCriterion
-import utils.io as io
+from torch.nn import functional as F
+
+from exp.ours.image_featurizer.image_featurizer import ImageRegionFeatures
 
 
 def positionalencoding1d(d_model, length):
@@ -56,15 +56,18 @@ class AnswerInputEmbedding(nn.Module):
         
 
 class GPV(nn.Module):
-    def __init__(self,cfg):
+    def __init__(self,cfg, detr=True):
         super().__init__()
         self.cfg = cfg
 
         # visual stream
-        if cfg.roi_head is True:
-            self.detr = create_detr_roi_head(cfg.detr)
+        if detr:
+            if cfg.roi_head is True:
+                self.detr = create_detr_roi_head(cfg.detr)
+            else:
+                self.detr = create_detr(cfg.detr)
         else:
-            self.detr = create_detr(cfg.detr)
+            self.detr = None
             
         self.detr_joiner = nn.Linear(
             cfg.detr_joiner.detr_dim,
@@ -119,8 +122,8 @@ class GPV(nn.Module):
         self.pos_enc.requires_grad = False
 
     
-    def load_pretr_detr(self):
-        loaded_model = torch.load(self.cfg.pretr_detr)['model'] # eg. key backbone.0.body.layer2.1.conv1.weight
+    def load_pretr_detr(self, device=None):
+        loaded_model = torch.load(self.cfg.pretr_detr, map_location=device)['model']
         curr_model = self.state_dict()
         for lk in loaded_model.keys():
             detr_lk ='detr.'+lk
@@ -134,50 +137,100 @@ class GPV(nn.Module):
         
         self.load_state_dict(curr_model)
 
-    def forward(self,images,queries,answer_token_ids,targets=None,vocab_mask=None):
+    def _get_encoding(self, images, queries):
         device = self.vision_token.device
-        outputs = self.detr(images)
+        if isinstance(images, ImageRegionFeatures):
+            outputs = {
+                'detr_hs': images.features.unsqueeze(0),
+                'pred_relevance_logits': images.objectness,
+                'pred_boxes': images.boxes
+            }
+        else:
+            outputs = self.detr(images)
+
         outputs['detr_hs'] = self.detr_joiner(outputs['detr_hs'])
 
         with torch.no_grad():
             query_encodings, token_inputs = self.bert(queries,device)
-        
+
         query_encodings = self.bert_joiner(query_encodings.detach())
 
         lv_hs = query_encodings
         vl_hs = outputs['detr_hs'][-1]
+
         for layer in self.co_att_transformer:
             lv_hs, vl_hs, _ = layer(
                 input_tensor1=lv_hs,
                 attention_mask1=None,
                 input_tensor2=vl_hs,
                 attention_mask2=None)
-        
+
         B,Tl,D = lv_hs.size()
         _,Tv,_ = vl_hs.size()
         lv_hs = lv_hs.view(1,B,Tl,D)
         vl_hs = vl_hs.view(1,B,Tv,D)
-        
+
         # relevance prediction
         relevance_logits = self.relevance_predictor(vl_hs)
+
         outputs['pred_relevance_logits'] = \
             outputs['pred_relevance_logits'] + relevance_logits[-1] #BxRx2
         if self.cfg.detr.aux_loss:
             for i,aux_outputs in enumerate(outputs['aux_outputs']):
                 aux_outputs['pred_relevance_logits'] = \
                     aux_outputs['pred_relevance_logits'] + relevance_logits[i]
-        
+
         # condition vl encoding on relevance prediction
-        vl_hs = self.condition_on_relevance(
-            outputs['pred_relevance_logits'],vl_hs)
+        vl_hs = self.condition_on_relevance(outputs['pred_relevance_logits'], vl_hs)
 
         # concat vl and lv to create a memory for text decoding
         memory = torch.cat((vl_hs,lv_hs),2)
+        return memory, outputs
+
+    def init_beam_search(self, images, queries, vocab_mask=None):
+        device = self.vision_token.device
+        memory, outputs = self._get_encoding(images, queries)
+
+        L, B, _, D = memory.size()
+
+        # sample text without teacher forcing
+        cls_token_id = torch.LongTensor([self.word_to_idx['__cls__']]).to(device)
+        start_pred = cls_token_id.view(1).repeat(B)
+        initial_state = {
+            "memory": memory.squeeze(0)
+        }
+
+        def decode(pred, state):
+            if "target_token_ids" in state:
+              target_token_ids = state["target_token_ids"]
+              target_token_ids = torch.cat((target_token_ids, pred.unsqueeze(1)), -1)
+            else:
+              target_token_ids = pred.unsqueeze(1)
+            target = self.answer_input_embedings(target_token_ids)
+            answer_logits = self.decode_text(target.unsqueeze(0), state["memory"].unsqueeze(0))  # LxBxSxV
+            answer_logits = answer_logits[:, :, -1]
+
+            answer_logits = F.log_softmax(answer_logits, -1)
+            if vocab_mask is not None:
+                answer_logits = answer_logits + vocab_mask
+            answer_logits = F.log_softmax(answer_logits, -1)
+
+            state["target_token_ids"] = target_token_ids
+            # print(target_token_ids, answer_logits.topk(dim=-1, k=10)[0])
+            return answer_logits.squeeze(0), state
+
+        return outputs, start_pred, initial_state, decode
+
+    def forward(self,images,queries,answer_token_ids,targets=None,vocab_mask=None,
+                return_all_losses=False):
+        device = self.vision_token.device
+        memory, outputs = self._get_encoding(images, queries)
+
         L,B,_,D = memory.size()
-        
+
         if answer_token_ids is None:
             # sample text without teacher forcing
-            cls_token_id = torch.LongTensor([self.word_to_idx['__cls__']]).cuda(device)
+            cls_token_id = torch.LongTensor([self.word_to_idx['__cls__']]).to(device)
             target_token_ids = cls_token_id.view(1,1,1).repeat(L,B,1)
             for t in range(self.cfg.max_text_len-1):
                 target = self.answer_input_embedings(target_token_ids)
@@ -198,15 +251,22 @@ class GPV(nn.Module):
             # sample text with teacher forcing
             target = self.answer_input_embedings(answer_token_ids) # BxTXD
             target = target.view(1,*target.size()).repeat(L,1,1,1)
-            outputs['answer_logits'] = self.decode_text(target,memory)[:,:,:-1]
+            # LxBxTtxV
+            logits = self.decode_text(target,memory)[:,:,:-1]
+            if vocab_mask is not None:
+                logits += vocab_mask.unsqueeze(0)
+
+            outputs['answer_logits'] = logits
 
         if targets is None:
             return outputs
         else:
-            total_loss = self.criterion(outputs,targets)[0]
+            total_loss, loss_dict = self.criterion(outputs,targets)
+            if return_all_losses:
+                return total_loss, loss_dict
             return total_loss
     
-    def forward_beam_search(self,images,queries,beam_size=1):
+    def forward_beam_search(self,images,queries,beam_size=1,vocab_mask=None):
         device = self.vision_token.device
         outputs = self.detr(images)
         outputs['detr_hs'] = self.detr_joiner(outputs['detr_hs'])
@@ -249,19 +309,21 @@ class GPV(nn.Module):
 
         outputs['answers'], outputs['answer_probs'] = self.beam_decode_text(
             memory,
-            K=beam_size)
+            K=beam_size,
+            vocab_mask=vocab_mask
+        )
             
         return outputs
 
-    def beam_decode_text(self,memory,K=25):
+    def beam_decode_text(self,memory,K=25,vocab_mask=None):
         device = self.vision_token.device
         L,B,_,D = memory.size()
-        cls_token_id = torch.LongTensor([self.word_to_idx['__cls__']]).cuda(device)
-        pad_token_id = torch.LongTensor([self.word_to_idx['__pad__']]).cuda(device)
-        stop_token_id = torch.LongTensor([self.word_to_idx['__stop__']]).cuda(device)
+        cls_token_id = torch.LongTensor([self.word_to_idx['__cls__']]).to(device)
+        pad_token_id = torch.LongTensor([self.word_to_idx['__pad__']]).to(device)
+        stop_token_id = torch.LongTensor([self.word_to_idx['__stop__']]).to(device)
         target_token_ids = cls_token_id.view(1,1,1,1).repeat(K,L,B,1)
-        seq_log_prob = torch.zeros([L,B,K]).cuda(device)
-        seqs = torch.zeros([K,L,B,self.cfg.max_text_len]).cuda(device)
+        seq_log_prob = torch.zeros([L,B,K]).to(device)
+        seqs = torch.zeros([K,L,B,self.cfg.max_text_len]).to(device)
         seen_stop = torch.zeros([L,B,K]).bool()
         for t in range(self.cfg.max_text_len-1):
             ranking_scores = [None]*K
@@ -269,6 +331,8 @@ class GPV(nn.Module):
             for k1 in range(K):
                 target = self.answer_input_embedings(target_token_ids[k1])
                 answer_logits = self.decode_text(target,memory) # LxBxSxV
+                if vocab_mask is not None:
+                  answer_logits = answer_logits + vocab_mask
                 log_prob = nn.functional.log_softmax(answer_logits,-1)
                 last_word_log_prob = log_prob[:,:,-1] # LxBxV
                 top_last_word = torch.topk(last_word_log_prob,k=K,dim=-1) # LxBxK2
@@ -286,8 +350,8 @@ class GPV(nn.Module):
             candidates = self.select_candidates(ranking_scores,K=K)
     
             new_target_token_ids = 0*target_token_ids
-            new_seqs = torch.zeros([K,L,B,self.cfg.max_text_len]).long().cuda(device)
-            new_last_word_ids = torch.zeros(K,L,B,1).long().cuda(device)
+            new_seqs = torch.zeros([K,L,B,self.cfg.max_text_len]).long().to(device)
+            new_last_word_ids = torch.zeros(K,L,B,1).long().to(device)
             new_seen_stop = torch.zeros([L,B,K]).bool()
             for l in range(L):
                 for b in range(B):
@@ -308,7 +372,10 @@ class GPV(nn.Module):
         answer_logits = [None]*K
         for k in range(K):
             target = self.answer_input_embedings(target_token_ids[k])
-            answer_logits[k] = self.decode_text(target,memory) # LxBxSxV
+            answer_logits_k = self.decode_text(target, memory)
+            if vocab_mask is not None:
+              answer_logits_k = answer_logits_k + vocab_mask
+            answer_logits[k] =  answer_logits_k # LxBxSxV
         
         answers = [None]*B
         answer_probs = [None]*B
@@ -331,7 +398,7 @@ class GPV(nn.Module):
         device = self.vision_token.device
         L,B,K1 = seq_log_prob.size()
         L,B,K2 = top_last_word.values.size()
-        ranking_scores = torch.zeros([L,B,K2]).cuda(device)
+        ranking_scores = torch.zeros([L,B,K2]).to(device)
         for l in range(L):
             for b in range(B):
                 if seen_stop[l,b,k1] is True:
@@ -374,12 +441,15 @@ class GPV(nn.Module):
         fused_hs = fused_hs + relevance_tokens
         return fused_hs
 
-    def encode_answers(self,targets):
+    def encode_answers(self,targets, device=None):
         B = len(targets)
         answers = ['']*B
         for i,t in enumerate(targets):
             if 'answer' in t:
                 answers[i] = t['answer']
+
+        if device is None:
+            device = self.vision_token.device
 
         if self.cfg.answering_type=='classification':
             padded_inputs = [None]*len(answers)
@@ -395,8 +465,7 @@ class GPV(nn.Module):
                     
                     padded_token_ids[i].append(token_id)
 
-            device = self.vision_token.device
-            padded_token_ids = torch.LongTensor(padded_token_ids).cuda(device)
+            padded_token_ids = torch.LongTensor(padded_token_ids).to(device)
         
         elif self.cfg.answering_type=='generation':
             padded_inputs = [None]*len(answers)
@@ -421,8 +490,7 @@ class GPV(nn.Module):
 
                 padded_token_ids[i] = token_ids[:self.cfg.max_text_len]
 
-            device = self.vision_token.device
-            padded_token_ids = torch.LongTensor(padded_token_ids).cuda(device)
+            padded_token_ids = torch.LongTensor(padded_token_ids).to(device)
         
         else:
             raise NotImplementedError
@@ -444,7 +512,7 @@ class GPV(nn.Module):
     def cls_token(self):
         device = self.vision_token.device
         return self.answer_input_embedings(
-            torch.LongTensor([self.word_to_idx['__cls__']]).cuda(device))[0]
+            torch.LongTensor([self.word_to_idx['__cls__']]).to(device))[0]
 
     def decode_text(self,target,memory):
         L,B,Tm,D = memory.size()
@@ -459,8 +527,7 @@ class GPV(nn.Module):
                 tgt_mask[t,j] = float('-inf')#1
         
         device = self.vision_token.device
-        #tgt_mask = tgt_mask.cuda(device)
-        tgt_mask = tgt_mask.bool().cuda(device)#.view(T,T).repeat(12,1,1)
+        tgt_mask = tgt_mask.bool().to(device)#.view(T,T).repeat(12,1,1)
         to_decode = self.text_decoder(
             target,memory,tgt_mask).permute(1,0,2).view(L,B,-1,D)
         return self.answer_head(to_decode) # LxBxTtxV
