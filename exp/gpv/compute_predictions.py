@@ -28,10 +28,15 @@ from utils.html_writer import HtmlWriter
 
 
 def make_predictions(model,dataloader,samples,cfg):
+    if torch.cuda.is_available():
+        device = torch.device(cfg.gpu)
+    else:
+        device = torch.device("cpu")
+
     vocab_mask=None
     if cfg.eval.task=='CocoClassification':
         tokens,vocab_mask = create_coco_vocab_mask(model)
-        vocab_mask = torch.FloatTensor(vocab_mask).cuda(cfg.gpu)
+        vocab_mask = torch.FloatTensor(vocab_mask).to(device)
 
     eval_dir = os.path.join(cfg.exp_dir,'eval')
     boxes_h5py = h5py.File(os.path.join(
@@ -40,6 +45,7 @@ def make_predictions(model,dataloader,samples,cfg):
     predictions = {}
     cnt = 0
     detokenizer = TreebankWordDetokenizer()
+
     model.eval()
     for i,data in enumerate(tqdm(dataloader)):
         if (cfg.eval.num_eval_batches is not None) \
@@ -47,7 +53,7 @@ def make_predictions(model,dataloader,samples,cfg):
             break
 
         imgs, queries, targets = data
-        imgs = imgs.to(torch.device(cfg.gpu))
+        imgs = imgs.to(device)
 
         outputs = model(imgs,queries,None,vocab_mask=vocab_mask)
         relevance = outputs['pred_relevance_logits'].softmax(-1).detach().cpu().numpy()
@@ -124,16 +130,17 @@ def update_samples_with_image_size(image_dir,samples):
     return samples
 
 
-@hydra.main(config_path=f'../../configs',config_name=f"exp/gpv")
+@hydra.main(config_path=f'../../configs', config_name=f"exp/gpv")
 def main(cfg):
-    eval_dir = os.path.join(cfg.exp_dir,'eval')
+    eval_dir = os.path.join(cfg.exp_dir, 'eval')
     io.mkdir_if_not_exists(eval_dir,recursive=True)
     print(cfg.pretty())
     print(cfg.exp_dir)
     eval_task = cfg.eval.task
     learning_datasets = {eval_task:cfg.learning_datasets[eval_task]}
     dataset = CocoMultitaskDataset(
-        learning_datasets,cfg.task_configs,cfg.eval.subset)
+        learning_datasets, cfg.task_configs, cfg.eval.subset)
+
     dataloader = dataset.get_dataloader(
         batch_size=cfg.eval.batch_size,
         num_workers=cfg.eval.num_workers,
@@ -142,10 +149,15 @@ def main(cfg):
     task_name = cfg.learning_datasets[eval_task].name
     samples = dataloader.dataset.datasets[task_name].samples
 
+    prefix = f"{cfg.eval.task}_{cfg.task_configs.data_split}_{cfg.eval.subset}"
+
     if cfg.eval.predict is True:
+        if torch.cuda.is_available():
+            loc = 'cuda:{}'.format(cfg.gpu)
+        else:
+            loc = "cpu"
         model = GPV(cfg.model)
-        model.cuda(cfg.gpu)
-        loc = 'cuda:{}'.format(cfg.gpu)
+        model.to(loc)
         loaded_dict = torch.load(cfg.eval.ckpt, map_location=loc)['model']
         state_dict = model.state_dict()
         for k,v in state_dict.items():
@@ -155,13 +167,13 @@ def main(cfg):
         model.load_state_dict(state_dict)
 
         with torch.no_grad():
-            make_predictions(model,dataloader,samples,cfg)
+            make_predictions(model, dataloader,samples, cfg)
 
     predictions = io.load_json_object(os.path.join(
-        eval_dir,f'{cfg.eval.task}_{cfg.task_configs.data_split}_{cfg.eval.subset}_predictions.json'))
+        eval_dir,f'{prefix}_predictions.json'))
 
     boxes_h5py = h5py.File(os.path.join(
-        eval_dir,f'{cfg.eval.task}_{cfg.task_configs.data_split}_{cfg.eval.subset}_boxes.h5py'),'r')
+        eval_dir,f'{prefix}_boxes.h5py'),'r')
 
     if cfg.eval.task in ['CocoDetection','RefCocop']:
         samples = update_samples_with_image_size(
@@ -185,10 +197,11 @@ def main(cfg):
         metrics,
         os.path.join(
             eval_dir,
-            f'{cfg.eval.task}_{cfg.task_configs.data_split}_{cfg.eval.subset}_metrics.json'))
+            f'{prefix}_metrics.json'))
 
     boxes_h5py.close()
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     main()
 
