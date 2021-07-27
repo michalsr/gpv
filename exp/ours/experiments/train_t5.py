@@ -61,10 +61,7 @@ def main():
     pre_tokenize=True,
     nms=0.5 if isinstance(localization_loss, BoxClsLoss) else 0.0,
     image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
-    # image_relevance=LinearObjectness(t5_dim),
-    query_box="always"
   )
-  print("QUERY ON")
 
   groups = []
   if args.vfreeze not in {"all", "backbone"}:

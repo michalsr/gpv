@@ -15,7 +15,7 @@ from exp.ours.train import evaluator
 from exp.ours.train import optimizer_builder
 from exp.ours.train.trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
 
-from exp.ours.data.gpv_data import Task, GPV1_TASKS, GPV2_TASKS
+from exp.ours.data.gpv_data import Task, GPV1_TASKS
 
 
 def add_image_featurizer_args(parser: ArgumentParser, vfreeze="none", vmodel=None):
@@ -147,8 +147,6 @@ def run_train(args, model, logging_ema=0.99, sync_monitor=True,
     tasks = list(Task)
   elif args.tasks == ["gpv1"]:
     tasks = GPV1_TASKS
-  elif args.tasks == ["gpv2"]:
-    tasks = GPV2_TASKS
   else:
     tasks = [Task(x) for x in args.tasks]
     if len(set(tasks)) != len(args.tasks):
@@ -311,7 +309,6 @@ def run_train(args, model, logging_ema=0.99, sync_monitor=True,
     clip_grad_norm=args.clip_grad_norm,
     tb_log_intervals=10,
     clip_grad_norm_re=vision_regex,
-    epoch_end_hook=epoch_end_hook,
     sort_train=False,
     checkpoint=True,
     sync_monitor=sync_monitor,
