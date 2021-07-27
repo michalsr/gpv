@@ -1,0 +1,103 @@
+import json
+import os
+
+from transformers import AutoConfig
+
+from exp.ours.models.layers import *
+from exp.ours.models.losses import *
+from exp.ours.models.model_utils import BackboneParameterExtractor
+from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
+  DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+from exp.ours.experiments.cli_train import *
+from exp.ours.data.gpv_data import Task
+from exp.ours.models.t5_gpv import T5GPV
+from exp.ours.util import py_utils
+
+
+def main():
+  parser = ArgumentParser()
+  parser.add_argument("--model", choices=["t5-small", "t5-base", "t5-large"], default=None)
+  parser.add_argument("--lr", type=float, default=3e-4)
+  parser.add_argument("--vlr", type=float)
+  parser.add_argument("--vwarmup", type=float, default=0.1)
+  parser.add_argument("--localization_loss", choices=["detr", "boxcls"], default="detr")
+  parser.add_argument("--weight_decay", type=float, default=1e-4)
+  parser.add_argument("--delay", type=float, default=0.0)
+  add_image_featurizer_args(parser, vfreeze="all", vmodel="detr_boxes")
+  add_train_args(
+    parser, tasks=[str(Task.CAPTIONING)], epochs=4,
+    clip_grad_norm=None, num_workers=4, batch_size=60)
+  args = parser.parse_args()
+
+  py_utils.add_stdout_logger()
+
+  if args.model is None:
+    if args.debug in ["tiny", "small"]:
+      args.model = "t5-small"
+    else:
+      args.model = "t5-base"
+
+  image_featurizer, image_dim = get_image_featurizer(args)
+
+  conf = AutoConfig.from_pretrained(args.model)
+  t5_dim = conf.d_model
+
+  joiner = Linear(image_dim, t5_dim)
+
+  losses = ['labels'] if args.vmodel == "detr_model" else ['labels', 'boxes']
+  if args.localization_loss == "detr":
+    localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, losses)
+  else:
+    localization_loss = BoxClsLoss(0.5)
+
+  model = T5GPV(
+    args.model,
+    loss=BasicGPVLoss(1, 1, 1, 1, localization_loss, False),
+    image_feature_extractor=image_featurizer,
+    image_joiner=joiner,
+    pre_tokenize=True,
+    nms=0.5 if isinstance(localization_loss, BoxClsLoss) else 0.0,
+    image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
+    # image_relevance=LinearObjectness(t5_dim),
+    query_box="always"
+  )
+  print("QUERY ON")
+
+  groups = []
+  if args.vfreeze not in {"all", "backbone"}:
+    groups.append(ParameterGroup(
+      BackboneParameterExtractor(),
+      group_name="backbone",
+      overrides=dict(delay=args.delay, warmup=args.vwarmup, lr=args.vlr),
+    ))
+
+  groups.append(ParameterGroup(
+    AllParameters(),
+    group_name="other",
+    overrides=dict(delay=0.0, warmup=0.1, lr=args.lr),
+    allow_overlap=True
+  ))
+
+  scheduler = DelayedWarmupScheduleBuilder()
+  optimizer = AdamWBuilder(
+    lr=args.lr,
+    weight_decay=args.weight_decay,
+    parameter_groups=groups
+  )
+
+  print("Optimizer:")
+  print(json.dumps(to_params(optimizer, OptimizerBuilder), indent=2))
+
+  run_train(
+    args, model, logging_ema=0.995, sync_monitor=True,
+    epoch_end_hook=None, groups=[],
+    find_unused_parameters=True,
+    optimizer=optimizer, scheduler=scheduler
+  )
+
+
+if __name__ == '__main__':
+  main()

@@ -1,0 +1,73 @@
+from typing import List
+
+from allennlp.common import Registrable
+from dataclasses import dataclass
+
+from data.coco.synonyms import SYNONYMS
+from exp.ours.data.dataset import GpvDataset
+from exp.ours.data.source_data import ID_TO_COCO_CATEGORY
+from exp.ours.train.runner import PredictionArg
+from exp.ours.util import py_utils
+
+
+class MaskSpec(PredictionArg):
+
+  def target_eos(self):
+    raise NotImplementedError()
+
+  def get_target_words(self, task):
+    raise ValueError()
+
+  def get_inverse(self):
+    return False
+
+
+@PredictionArg.register("coco-cat-voc")
+@dataclass
+class CocoCategoryVoc(MaskSpec):
+  val: float
+  syn: bool = False
+  inverse: bool = False
+
+  def target_eos(self):
+    return True
+
+  def get_name(self):
+    return "coco_category_voc"
+  
+  def get_target_words(self, task):
+    if self.syn:
+      raise NotImplementedError()
+    return list(ID_TO_COCO_CATEGORY.values())
+
+  def get_inverse(self):
+    return self.inverse
+
+
+@dataclass
+@PredictionArg.register("sce-unseen-categories")
+class SceUnseenCategories(MaskSpec):
+  val: float
+  syn: bool=False
+
+  def get_name(self):
+    return "sce_unseen"
+
+  def get_target_words(self, task):
+    words = GpvDataset.UNSEEN_GROUPS[task]
+    if self.syn:
+      words = py_utils.flatten_list(SYNONYMS[x] for x in words)
+    return words
+
+
+@dataclass
+@PredictionArg.register("target-words")
+class TargetWords(MaskSpec):
+  words: List[str]
+  val: float
+
+  def get_name(self):
+    return "words"
+
+  def get_target_words(self, task):
+    return self.words

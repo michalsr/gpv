@@ -1,0 +1,41 @@
+<html>
+<body>
+<div style="position: fixed; bottom: 1em; left: 1em; z-index: 99999; background-color: gray;">
+  <input type="range" min="0" max="1.0" value="0.1" step="0.02"
+         class="slider" id="relslider">
+  <input type="range" min="1" max="100" value="100" step="1"
+         class="slider" id="maxslider">
+</div>
+<script>
+    function hide_boxes(val, max_boxes) {
+      console.log("Update rel to " + val + " and max to " + max_boxes);
+      var boxes = document.getElementsByClassName("box");
+        var i;
+        for (i = 0; i < boxes.length; i++) {
+            var rel = parseFloat(boxes[i].getAttribute("data-rel") || "1.0");
+            var rank = parseInt(boxes[i].getAttribute("data-rank") || "1");
+            if (rel > val && rank < max_boxes) {
+                boxes[i].style.visibility = "";
+            } else {
+                boxes[i].style.visibility = "hidden";
+            }
+        }
+    }
+    var slider = document.getElementById("relslider");
+    var max_slider = document.getElementById("maxslider");
+    slider.oninput = function() {
+        hide_boxes(this.value, max_slider.value);
+    }
+    max_slider.oninput = function() {
+      hide_boxes(slider.value, this.value);
+    }
+</script>
+
+$html_contents
+
+<script>
+hide_boxes(document.getElementById("relslider").value, document.getElementById("maxslider").value)
+</script>
+
+</body>
+</html >
