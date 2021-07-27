@@ -1,3 +1,5 @@
+transformers==4.5.1
+allennlp==2.4.0
 hydra-core==1.0.0rc2
 omegaconf==2.0.1rc11
 ipython==7.16.1
@@ -7,7 +9,6 @@ ipywidgets==7.6.3
 tensorboard==2.3.0
 opencv-python==4.2.0.32
 tqdm==4.48.2
-transformers==3.0.2
 nltk==3.5
 wget==3.2
 PyDictionary==2.0.1
