@@ -1,3 +1,4 @@
+from exp.ours.file_paths import BEST_STATE_NAME
 from exp.ours.models.model import GPVModel
 from exp.ours.util import py_utils
 from exp.ours.util.our_utils import import_all, select_run_dir
@@ -7,7 +8,7 @@ from os.path import dirname, join, exists
 import torch
 from allennlp.common import Params
 
-from utils.io import load_json_objectz
+from utils.io import load_json_object
 
 
 def load_model(run_dir, use_best_weights=True, device=None,
