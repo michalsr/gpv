@@ -34,7 +34,8 @@ class ImageRegionFeatures:
     return ImageRegionFeatures(
       our_utils.stack_and_pad(boxes, max_len),
       our_utils.stack_and_pad(features, max_len),
-      our_utils.stack_and_pad(objectness, max_len),
+      # -10000 so the padding is a valid log-probability
+      our_utils.stack_and_pad(objectness, max_len, -10000),
       n_boxes,
     )
 
