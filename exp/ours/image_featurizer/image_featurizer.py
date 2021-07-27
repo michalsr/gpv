@@ -259,19 +259,6 @@ class ImageCollateWithBoxes(ImageCollater):
     return out, box_targets
 
 
-def _load_bbox(targets, box_file, return_objectness):
-  out = {}
-  with h5py.File(box_file, "r") as f:
-    for k in targets:
-      box = f[k]["boxes"][:]
-      if return_objectness:
-        rel = f[k]["relevance_logits"][:]
-      else:
-        rel = None
-      out[k] = (box, rel)
-  return out
-
-
 @ROIFeatureExtractor.register("box-embed-feature-extractor")
 class BoxEmbedFeatureExtractor(ROIFeatureExtractor):
   """Does ROI pooling to get features for image regions"""
