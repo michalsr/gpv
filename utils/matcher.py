@@ -73,7 +73,22 @@ class HungarianMatcher(nn.Module):
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
-        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+
+        if "n_boxes" in outputs:
+            n_boxes = outputs["n_boxes"]
+            indices = [linear_sum_assignment(c[i, :n_boxes[i]]) for i, c in enumerate(C.split(sizes, -1))]
+        else:
+            try:
+                indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+            except Exception as e:
+                import pickle
+                with open("/tmp/dbg.pkl", "wb") as f:
+                    pickle.dump([
+                        out_bbox, tgt_ids, tgt_bbox, out_prob,
+                        cost_class, cost_giou, cost_bbox, C,
+                        [(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+                    ], f)
+                raise e
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 
