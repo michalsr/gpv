@@ -11,15 +11,18 @@ import torch
 import torchvision.ops
 from PIL import Image
 from attr import dataclass
+import torchvision.transforms as T
 
 from exp.ours import file_paths
 from exp.ours.data.gpv_data import GPVExample, Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater, get_box_targets, \
   ImageFeatureExtractor, \
   ImageRegionFeatures, numpy_xyxy_to_cxcywh, numpy_xywh_to_cxcywh
+from exp.ours.models.gpv1_preprocessing import get_stocastic_transforms
 from exp.ours.models.layers import Layer
 from exp.ours.util import image_utils, our_utils, py_utils
 from exp.vinvl.get_vinvl import get_vinvl
+from exp.vinvl import transforms as vinvl_transforms
 from exp.vinvl.structures.bounding_box import BoxList
 from exp.vinvl.structures.image_list import to_image_list
 from torchvision.transforms import functional as F
@@ -228,18 +231,41 @@ class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
   """Builds by features by running a VinVL backbone on pre-computed boxes
   """
 
-  def __init__(self, box_src, model="release", box_embed: Layer=None, freeze=None):
+  def __init__(self, box_src, model="release", box_embed: Layer=None, freeze=None,
+               train_transform=None):
     super().__init__()
     self.model = model
     self.box_embed = box_embed
     self.box_src = box_src
     self.freeze = freeze
+    self.train_transform = train_transform
 
     vinvl, eval_transform = get_vinvl(model)
+    if train_transform is None:
+      train_transforms = {t: eval_transform for t in Task}
+    elif train_transform == "gpv1":
+
+      train_transforms = {}
+      for task in Task:
+        tr = get_stocastic_transforms(task, cls_horizontal_flip=False)
+        tr = [
+          vinvl_transforms.TransformWrapper(T.Compose(tr)),
+          vinvl_transforms.Resize(600, 1000),
+          vinvl_transforms.RandomHorizontalFlip(0.5),
+          vinvl_transforms.ToTensor(),
+          vinvl_transforms.Normalize(
+            mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_bgr255=True),
+        ]
+        train_transforms[task] = vinvl_transforms.Compose(tr)
+    else:
+      raise NotImplementedError(train_transform)
+
+    self.eval_transform = eval_transform
+    self.train_transforms = train_transforms
+
     self.backbone = vinvl.backbone
     self.feature_extractor = vinvl.roi_heads["box"].feature_extractor
     self.pool = vinvl.roi_heads['box'].post_processor.avgpool
-    self.eval_transform = eval_transform
     if self.freeze == "all":
       for m in [self.backbone, self.pool, self.feature_extractor]:
         for p in m.parameters():
@@ -248,8 +274,7 @@ class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
       raise ValueError()
 
   def get_collate(self, is_train=False) -> 'ImageCollater':
-    train_transforms = {t: self.eval_transform for t in Task}
-    return VinvlCollate(train_transforms, self.eval_transform, is_train,
+    return VinvlCollate(self.train_transforms, self.eval_transform, is_train,
                         image_utils.get_hdf5_image_file(self.box_src))
 
   def forward(self, images, targets, objectness, query_boxes) -> ImageRegionFeatures:
@@ -261,6 +286,9 @@ class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
       if q_box is not None:
         boxes = targets[i]
         boxes.bbox = torch.cat([boxes.bbox, q_box], 0)
+        # Its not really clear how to handle objectness for the query boxes,
+        # currently we just allow the objectness to be shorter than the number of boxes
+        # and trust the client won't try to naively use the objectness of query boxes
 
     features = self.feature_extractor(features, targets)
     features = self.pool(features)
