@@ -4,13 +4,13 @@ import json
 from os.path import join
 
 import h5py
-from exp.ours import config
+from exp.ours import file_paths
 import numpy as np
 
 
 def main():
-  file = h5py.File(join(config.CACHE_DIR, "trainval-mscoco-faster-rcnn.hdf5"), "w")
-  source_file = config.FASTER_RCNN_SOURCE
+  file = h5py.File(join(file_paths.CACHE_DIR, "trainval-mscoco-faster-rcnn.hdf5"), "w")
+  source_file = file_paths.FASTER_RCNN_SOURCE
 
   with open(source_file, "r+b") as source_f:
     for line in source_f:

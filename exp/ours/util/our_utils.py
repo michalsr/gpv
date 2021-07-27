@@ -13,7 +13,7 @@ from torch import nn
 from torch.utils.data import Sampler, IterableDataset
 
 from exp.gpv.models.detr_roi_head import create_detr_roi_head
-from exp.ours import config
+from exp.ours import file_paths
 from utils.io import load_json_object
 import torch.nn.functional as F
 IMPORT_DONE = False
@@ -382,7 +382,7 @@ def get_detr_model(num_queries=100, pretrained="coco_sce", lr_backbone=0,
 
   if pretrained:
     state_dict = torch.load(
-      config.PRETRAINED_DETR_MODELS[pretrained], map_location="cpu")['model']
+      file_paths.PRETRAINED_DETR_MODELS[pretrained], map_location="cpu")['model']
     if not load_object_classifier:
       del state_dict["class_embed.weight"]
       del state_dict["class_embed.bias"]

@@ -7,7 +7,7 @@ from .attr_rcnn import AttrRCNN
 from .structures.image_list import to_image_list
 from .transforms import build_transforms
 from .utils.checkpoint import DetectronCheckpointer
-from ..ours import config
+from ..ours import file_paths
 from ..ours.util.py_utils import DisableLogging
 
 
@@ -22,11 +22,11 @@ def vinvl_colllate_images(batch):
 
 def get_vinvl(model="release"):
   if model == "release":
-    src = join(config.VINVL_SOURCE, "release")
+    src = join(file_paths.VINVL_SOURCE, "release")
   elif model == "R50C4_4sets":
-    src = join(config.VINVL_SOURCE, "R50C4_4sets_174000_model.roi_heads.score_thresh_0.2")
+    src = join(file_paths.VINVL_SOURCE, "R50C4_4sets_174000_model.roi_heads.score_thresh_0.2")
   elif model == "R50C4_4setsvg":
-    src = join(config.VINVL_SOURCE, "R50C4_4setsvg_005000_model.roi_heads.score_thresh_0.2")
+    src = join(file_paths.VINVL_SOURCE, "R50C4_4setsvg_005000_model.roi_heads.score_thresh_0.2")
   else:
     raise NotImplementedError()
 

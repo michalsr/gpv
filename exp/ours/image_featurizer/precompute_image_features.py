@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.data.gpv_data import Task, GPVExample
 from exp.ours.experiments.cli_utils import add_dataset_args, get_datasets_from_args
 from exp.ours.image_featurizer.detr_featurizer import PretrainedDetrFeaturizer
@@ -180,7 +180,7 @@ def main():
   logging.info(f"Running on {len(targets)} images")
 
   if output_format == "directory":
-    out = join(config.CACHE_DIR, args.name)
+    out = join(file_paths.CACHE_DIR, args.name)
     logging.info(f"Saving into {out}")
     if not exists(out):
       mkdir(out)
@@ -195,7 +195,7 @@ def main():
     out.create_dataset("box_format", data="xyxy")
 
   elif output_format == "pkl":
-    f = join(config.CACHE_DIR, f"{args.name}.pkl")
+    f = join(file_paths.CACHE_DIR, f"{args.name}.pkl")
     logging.info(f"Saving into {f}")
     out = {}
 

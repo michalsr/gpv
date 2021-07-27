@@ -12,7 +12,7 @@ import skimage.io as skio
 from PIL import Image
 from skimage.transform import resize
 
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.util import py_utils
 
 DUMMY_IMAGE_ID = object()
@@ -28,8 +28,8 @@ def file_from_imageid(image_subset: str, image_id: int):
 
 def _build_image_file_map():
   file_map = {}
-  for dirname in listdir(config.COCO_IMAGES):
-    dirname = join(config.COCO_IMAGES, dirname)
+  for dirname in listdir(file_paths.COCO_IMAGES):
+    dirname = join(file_paths.COCO_IMAGES, dirname)
     if not isdir(dirname):
       continue
     for file in listdir(dirname):
@@ -43,7 +43,7 @@ _IMAGE_ID_TO_FILE_MAP = None
 def get_image_file(image_id):
   if isinstance(image_id, dict):
     filename = file_from_imageid(image_id["subset"], image_id["image_id"])
-    image_file = join(config.COCO_IMAGES, image_id["subset"], filename)
+    image_file = join(file_paths.COCO_IMAGES, image_id["subset"], filename)
     if not exists(image_file):
       raise ValueError(f"Missing file {image_file} for image {image_id}")
     return image_file
@@ -52,7 +52,7 @@ def get_image_file(image_id):
   if _IMAGE_ID_TO_FILE_MAP is None:
     _IMAGE_ID_TO_FILE_MAP = _build_image_file_map()
   if image_id not in _IMAGE_ID_TO_FILE_MAP:
-    raise ValueError(f"Missing file for image {image_id} in {config.COCO_IMAGES}")
+    raise ValueError(f"Missing file for image {image_id} in {file_paths.COCO_IMAGES}")
   return _IMAGE_ID_TO_FILE_MAP[image_id]
 
 
@@ -146,8 +146,8 @@ def load_image_ndarray(image_id, image_size=None, crop=None) -> Tuple[np.ndarray
 
 
 def get_hdf5_image_file(name):
-  if not exists(config.PRECOMPUTED_FEATURES_DIR):
-    mkdir(config.PRECOMPUTED_FEATURES_DIR)
+  if not exists(file_paths.PRECOMPUTED_FEATURES_DIR):
+    mkdir(file_paths.PRECOMPUTED_FEATURES_DIR)
   # if name == "detr-eval":  # Backwards compatibility fix
   #   name = "detr-coco-sce"
-  return join(config.PRECOMPUTED_FEATURES_DIR, name + ".hdf5")
+  return join(file_paths.PRECOMPUTED_FEATURES_DIR, name + ".hdf5")

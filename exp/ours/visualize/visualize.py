@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from torchvision.ops import box_convert
 
 from data.coco.synonyms import SYNONYMS
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.data.dataset import GpvDataset
 from exp.ours.data.gpv_data import Task, GPVExample, GPV1_TASKS
 from exp.ours.data.source_data import CocoCaptions, CocoBoxClsExample, ID_TO_COCO_CATEGORY, \
@@ -106,7 +106,7 @@ class CocoVisualize:
       if crop:
         cropped_file = image_utils.get_cropped_img_key(image_id, crop)
         cropped_file = join("cropped", cropped_file + ".jpg")
-        cropped_full_path = join(config.VISUALIZATION_DIR, cropped_file)
+        cropped_full_path = join(file_paths.VISUALIZATION_DIR, cropped_file)
         if not exists(cropped_full_path):
           logging.info(f"Building cropped image {cropped_full_path}")
           img = PIL.Image.open(image_file)
@@ -426,7 +426,7 @@ def save_html(html, name, sliders=True):
     html = template.substitute(html_contents="\n".join(html))
   else:
     html = "\n".join(html)
-  with open(join(config.VISUALIZATION_DIR, f"{name}.html"), "w") as f:
+  with open(join(file_paths.VISUALIZATION_DIR, f"{name}.html"), "w") as f:
     f.write(html)
 
 
@@ -451,7 +451,7 @@ def visualize_classification():
         print(answer)
         html += viz.get_cls_html(instance, answer, u_classes, s_classes)
 
-    with open(join(config.VISUALIZATION_DIR, "out.html"), "w") as f:
+    with open(join(file_paths.VISUALIZATION_DIR, "out.html"), "w") as f:
       f.write("\n".join(html))
 
 
@@ -510,7 +510,7 @@ def visualize_caption():
     html += viz.get_multi_captioning_html(instance, names, captions, cap_scores, unseen_concepts, None, None)
 
   logging.info("Writing")
-  with open(join(config.VISUALIZATION_DIR, "out.html"), "w") as f:
+  with open(join(file_paths.VISUALIZATION_DIR, "out.html"), "w") as f:
     f.write(template.substitute(html_contents="\n".join(html)))
 
 

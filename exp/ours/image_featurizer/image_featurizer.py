@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from torch import nn
 from torchvision.transforms.functional import hflip
 
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.data.gpv_data import Task, GPVExample
 from exp.ours.models.gpv1_preprocessing import get_train_transforms, get_eval_transform
 from exp.ours.models.layers import Layer

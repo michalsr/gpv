@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional, Dict, Any
 
 from dataclasses import dataclass
 
-from exp.ours import config
+from exp.ours import file_paths
 from exp.ours.util import image_utils
 from utils.io import load_json_object, dump_json_object
 import numpy as np
@@ -40,7 +40,7 @@ def load_instances(kind, split, gpv_split=True) -> List[Dict]:
     split_txt = "gpv_split"
   else:
     split_txt = "original_split"
-  target_file = join(config.SOURCE_DIR, ds, split_txt, f"{split}.json")
+  target_file = join(file_paths.SOURCE_DIR, ds, split_txt, f"{split}.json")
   logging.info(f"Loading instances from {target_file}")
   return load_json_object(target_file)
 
@@ -386,14 +386,14 @@ def get_coco_boxes(split: str, cache=True):
   if split not in {"train", "val"}:
     raise ValueError(split)
 
-  cache_name = join(config.CACHE_DIR, f"coco-bboxes-{split}-v3.json")
+  cache_name = join(file_paths.CACHE_DIR, f"coco-bboxes-{split}-v3.json")
   if exists(cache_name) and cache:
     logging.info(f"Loading {split} coco bboxes from cache")
     data = load_json_object(cache_name, compress=False)
     return [CocoBBoxes.from_json(x) for x in data]
 
   logging.info(f"Loading {split} coco bbox files")
-  raw_file = join(config.COCO_ANNOTATIONS, f"instances_{split}2014.json")
+  raw_file = join(file_paths.COCO_ANNOTATIONS, f"instances_{split}2014.json")
   boxes = load_coco_boxes(raw_file)
 
   logging.info(f"Saving to cache")
@@ -409,7 +409,7 @@ def get_coco_captions(split: str):
   if split not in {"train", "val"}:
     raise ValueError(split)
   logging.info(f"Loading {split} coco captions")
-  raw_file = join(config.COCO_ANNOTATIONS, f"captions_{split}2014.json")
+  raw_file = join(file_paths.COCO_ANNOTATIONS, f"captions_{split}2014.json")
   return load_coco_captions(raw_file)
 
 
@@ -417,15 +417,15 @@ def get_vqa2_questions(split: str):
   if split not in {"train", "val"}:
     raise ValueError(split)
 
-  cache_name = join(config.CACHE_DIR, f"vqa2.0-{split}.json")
+  cache_name = join(file_paths.CACHE_DIR, f"vqa2.0-{split}.json")
   if exists(cache_name):
     logging.info(f"Loading {split} vqa2.0 from cache")
     data = load_json_object(cache_name, compress=False)
     return [VqaQuestion.from_json(x) for x in data]
 
   logging.info(f"Loading {split} vqa2.0 questions")
-  anno_file = join(config.VQA2_SOURCE, f"v2_mscoco_{split}2014_annotations.json")
-  q_file = join(config.VQA2_SOURCE, f"v2_OpenEnded_mscoco_{split}2014_questions.json")
+  anno_file = join(file_paths.VQA2_SOURCE, f"v2_mscoco_{split}2014_annotations.json")
+  q_file = join(file_paths.VQA2_SOURCE, f"v2_OpenEnded_mscoco_{split}2014_questions.json")
   questions = load_vqa_questions(q_file, anno_file)
 
   logging.info(f"Saving to cache")
