@@ -171,13 +171,19 @@ class VinvlCollate(ImageCollater):
         size = img.size[::-1]
       elif self.read_image_mode == "vinvl":
         image_f = image_utils.get_image_file(example.image_id)
-        tmp = cv2.imread(image_f)
-        # VinVL encodes and then decodes the image due to its pre-processing setup, I have seen
-        # the encoding/decoding procedure slightly alter the image (maybe due to the jpg encoding?)
-        # so we do it here to 100% match with image format VinVL is trained on
-        img = Image.open(io.BytesIO(cv2.imencode('.jpg', tmp)[1])).convert('RGB')
-        img = image_utils.crop_img(img, example.crop)
-        size = img.size
+        try:
+          # VinVL encodes and then decodes the image due to its pre-processing setup, I have seen
+          # the encoding/decoding procedure slightly alter the image (maybe due to the jpg encoding?)
+          # so we do it here to 100% match with image format VinVL is trained on
+          tmp = cv2.imread(image_f)
+          img = Image.open(io.BytesIO(cv2.imencode('.jpg', tmp)[1])).convert('RGB')
+          img = image_utils.crop_img(img, example.crop)
+          size = img.size
+        except cv2.error:
+          # This load method fails for some formats (i.e., GIFs) due to limited support
+          # of cv2.imread, we fall back to the more general load_image_data
+          img, size = image_utils.load_image_data(example, None)
+          img = F.to_pil_image(img).convert("RGB")
       else:
         raise NotImplementedError()
       image_sizes.append(size)
@@ -319,10 +325,10 @@ class VinvlImageFeaturizer(ImageFeatureExtractor):
   Note I am currently not sure if a loss can backprop through its outputs effectively or not
   """
 
-  def __init__(self, model="release", include_all_image_box=False):
+  def __init__(self, model="release"):
     super().__init__()
     self.model = model
-    self.vinvl, eval_transform = get_vinvl(model, include_all_image_box)
+    self.vinvl, eval_transform = get_vinvl(model)
     eval_transform = eval_transform
     self.eval_transform = eval_transform
     self.train_transforms = {t: eval_transform for t in Task}
