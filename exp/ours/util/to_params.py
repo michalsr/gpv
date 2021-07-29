@@ -1,3 +1,4 @@
+import enum
 import inspect
 import typing
 from collections import OrderedDict
@@ -27,7 +28,7 @@ def _has_args(anno):
 
 
 def _is_fromparams(anno):
-  if type(anno) != type:
+  if type(anno) not in {type, enum.EnumMeta}:
     # typing.* annotations do not work with issubclass, so fail them here since `FromParam`
     # objects will be annotated with actual types
     return False
