@@ -27,8 +27,11 @@ def _has_args(anno):
 
 
 def _is_fromparams(anno):
-  if anno == typing.Any:
+  if type(anno) != type:
+    # typing.* annotations do not work with issubclass, so fail them here since `FromParam`
+    # objects will be annotated with actual types
     return False
+
   return issubclass(anno, FromParams)
 
 
