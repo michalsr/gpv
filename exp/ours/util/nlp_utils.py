@@ -20,7 +20,7 @@ def tokenize_with_cache(text, tokenizer, cache):
   return out
 
 
-def encode_with_cache(text, tokenizer, cache):
+def encode_with_cache(text, tokenizer, cache) -> List[int]:
   out = []
   for word in text.split():
     cached = cache.get(word)
