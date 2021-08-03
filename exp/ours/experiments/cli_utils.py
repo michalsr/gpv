@@ -14,6 +14,7 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
   parser.add_argument("--part", default=part_default,
                       choices=["val", "test", "all", "train"], nargs="+")
   parser.add_argument("--task", default=task_default,
+                      required=task_default is None,
                       choices=[str(x) for x in Task] + ["all", "gpv1", "gpv2"], nargs="+")
   if sample:
     parser.add_argument("--sample", type=int)
@@ -48,6 +49,8 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
     tasks = list(Task)
   elif tasks == ["gpv1"]:
     tasks = GPV1_TASKS
+  elif tasks == ["non-cls"]:
+    tasks = [x for x in Task if x != Task.CLS]
   elif any(x == "train" for x in tasks):
     if train_tasks is None:
       raise ValueError()
