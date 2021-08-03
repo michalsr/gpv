@@ -60,7 +60,9 @@ def main():
     image_joiner=joiner,
     pre_tokenize=True,
     nms=0.5 if isinstance(localization_loss, BoxClsLoss) else 0.0,
-    image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
+    image_relevance=SumWithObjectness(t5_dim*2, objectness_factor=True),
+    query_box="always",
+    all_lower_case=False
   )
 
   groups = []
@@ -89,8 +91,7 @@ def main():
   print(json.dumps(to_params(optimizer, OptimizerBuilder), indent=2))
 
   run_train(
-    args, model, logging_ema=0.995, sync_monitor=True,
-    epoch_end_hook=None, groups=[],
+    args, model, logging_ema=0.995,
     find_unused_parameters=True,
     optimizer=optimizer, scheduler=scheduler
   )

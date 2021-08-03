@@ -76,7 +76,7 @@ class EvaluationSetup(FromParams):
     return super().from_params(params, constructor_to_call, constructor_to_inspect)
 
   evaluator: Evaluator
-  prediction_args: Dict[str, Union[PredictionArg, int, float, str]]
+  prediction_args: Dict[str, Union[PredictionArg, int, float, str, None]]
 
 
 @dataclass
