@@ -2,7 +2,7 @@ from allennlp.common import FromParams
 
 from exp.ours.data.gpv_data import GPVExample, Task
 from exp.ours.data.source_data import CocoCaptions, CocoBBoxes, CocoBoxClsExample, VqaQuestion, \
-  CocoBoxIdentificationExample
+  CocoBoxIdentificationExample, ClassWebClsExample
 import torchvision.transforms as T
 import numpy as np
 
@@ -164,10 +164,10 @@ class Gpv1Preprocessor(FromParams):
         query_boxes=all_image_box,
         target_answer=self.preprocess_text(answer)
       )]
-    elif isinstance(example, (CocoBoxClsExample, CocoBoxIdentificationExample)):
+    elif isinstance(example, (CocoBoxClsExample, CocoBoxIdentificationExample, ClassWebClsExample)):
       out = [GPVExample(
         example.get_gpv_id(),
-        Task.CLS if isinstance(example, CocoBoxClsExample) else Task.CLS_IN_CONTEXT,
+        Task.CLS_IN_CONTEXT if isinstance(example, CocoBoxIdentificationExample) else Task.CLS,
         example.image_id,
         self.cls_queries_tok,
         None,
