@@ -1,6 +1,7 @@
 import logging
 from argparse import ArgumentParser
 
+from exp.ours.boosting import CocoCategories
 from exp.ours.data.dataset import GpvDataset
 from exp.ours.experiments.cli_utils import MarkIfNotDefault
 from exp.ours.image_featurizer.image_featurizer import *
@@ -246,23 +247,23 @@ def get_trainer_from_args(
   evaluation = {
     Task.VQA: EvaluationSetup(
       evaluator.VqaEvaluator(),
-      dict(allennlp_spec=BeamSearchSpec(1, 8))
+      dict(beam_search_spec=BeamSearchSpec(1, 10))
     ),
     Task.CAPTIONING: EvaluationSetup(
       evaluator.CaptionEvaluator(per_caption=True),
-      dict(allennlp_spec=BeamSearchSpec(1, 30))
+      dict(beam_search_spec=BeamSearchSpec(1, 30))
     ),
     Task.DETECTION: EvaluationSetup(
       evaluator.DetectionEvaluator(),
-      dict(predict_text=False)
+      dict(beam_search_spec=None)
     ),
     Task.CLS: EvaluationSetup(
       evaluator.ClsEvaluator(),
-      dict(allennlp_spec=BeamSearchSpec(1, 4))
+      dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=CocoCategories())
     ),
     Task.CLS_IN_CONTEXT: EvaluationSetup(
       evaluator.ClsEvaluator(),
-      dict(allennlp_spec=BeamSearchSpec(1, 4))
+      dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=CocoCategories())
     )
   }
 
