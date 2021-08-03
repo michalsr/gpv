@@ -22,7 +22,7 @@ IMPORT_DONE = False
 def import_all():
   global IMPORT_DONE
   if not IMPORT_DONE:
-    for k in ["models", "train", "image_featurizer"]:
+    for k in ["models", "train", "image_featurizer", "experimental"]:
       import_module_and_submodules(f"exp.ours.{k}")
     IMPORT_DONE = True
 
@@ -237,7 +237,19 @@ def concat_masked_sequences(
     ], 1)
     return out, mask
   elif mask2 is None:
-    raise NotImplementedError("No mask2")
+    seq2_len = seq2.size(1)
+
+    if len(mask1.size()) == 2:
+      assert mask1.dtype == torch.bool or torch.all(torch.logical_or(mask1 == 0, mask1 == 1))
+      seq_len1 = mask1.int().sum(1)
+    else:
+      assert mask1.dtype == torch.long and len(mask1.size()) == 1
+      seq_len1 = mask1
+
+    out = F.pad(seq1, [0, 0, 0, seq2_len, 0, 0])
+    for i in range(batch):
+        out[i, seq_len1[i]:seq_len1[i]+seq2_len] = seq2[i]
+    return out, seq_len_to_binary_mask(seq_len1 + seq2_len)
   else:
     # both mask are not none
     if len(mask1.size()) != 1:
