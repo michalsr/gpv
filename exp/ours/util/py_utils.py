@@ -1,8 +1,10 @@
 import logging
+import re
 import sys
 import zlib
 from multiprocessing import Lock, Pool
 
+import regex
 import torch
 from collections import defaultdict
 from os import listdir, remove
@@ -263,7 +265,8 @@ def nested_struct_to_flat(tensors, prefix=(), cur_dict=None) -> Dict[Tuple, torc
       raise ValueError("Cannot convert empty dict")
     for k, v in tensors.items():
       if isinstance(k, int):
-        raise NotImplementedError()
+        # TODO do we still need this?
+        raise NotImplementedError("Integer keys")
       nested_struct_to_flat(v, prefix + (k, ), cur_dict)
   elif isinstance(tensors, (tuple, list)):
     if len(tensors) == 0:
@@ -349,3 +352,15 @@ def extract_module_from_state_dict(state_dict, name, replace=""):
     if k.startswith(name):
       out[replace + k[len(name):]] = v
   return out
+
+
+class ReplaceAll:
+
+  def __init__(self, replacements: Dict[str, str]):
+    rep_sorted = sorted(replacements, key=len, reverse=True)  # Match longest first
+    self.replacements = replacements
+    self.pattern = re.compile(r"(^|\W)(" + "|".join(regex.escape(x) for x in rep_sorted) + r")(?=\W|$)")
+
+  def replace(self, target: str) -> str:
+    # The first group matches the non-word prefix, which we keep, the second is the replacement string
+    return self.pattern.sub(lambda match: match.group(1) + self.replacements[match.group(2)], target)
