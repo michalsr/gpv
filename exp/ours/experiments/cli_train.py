@@ -1,7 +1,7 @@
 import logging
 from argparse import ArgumentParser
 
-from exp.ours.data.dataset import GpvDataset, InMemoryDataset
+from exp.ours.data.dataset import GpvDataset
 from exp.ours.experiments.cli_utils import MarkIfNotDefault
 from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.image_featurizer import vinvl_featurizer
@@ -51,7 +51,7 @@ def get_image_featurizer(args):
       raise ValueError()
     dim = 2048 + 5
     extractor = Hdf5FeatureExtractor("faster-rcnn", "xyxy", BasicBoxEmbedder())
-  elif args.vmodel == "dbg":
+  elif args.vmodel in {"dbg", "debug"}:
     dim = 32
     extractor = DebugFeaturizer(4, 32)
   elif args.vmodel == "vinvl-precomputed":
@@ -65,10 +65,13 @@ def get_image_featurizer(args):
   elif args.vmodel == "vinvl":
     if args.vfreeze != "all":
       raise ValueError()
-    # dim = 2048 + 5
-    # extractor = Hdf5FeatureExtractor("vinvl", "xyxy", BasicBoxEmbedder())
     dim = 2048
     extractor = Hdf5FeatureExtractor("vinvl")
+  elif args.vmodel == "web-vinvl":
+    if args.vfreeze != "all":
+      raise ValueError()
+    dim = 2048 + 5
+    extractor = Hdf5FeatureExtractor("web-features", box_embedder=BasicBoxEmbedder())
   elif args.vmodel == "vinvl-r50c4-4setvg":
     if args.vfreeze != "all":
       raise ValueError()
@@ -83,14 +86,11 @@ def get_image_featurizer(args):
                                      all_image_box=True, all_image_prior=-10000)
   elif args.vmodel == "vinvl-r50c4-4setvg-rboxes-bk":
     dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer("vinvl", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze)
+    extractor = VinvlBackboneImageFeaturizer(
+      "vinvl", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze, train_transform="gpv1")
   elif args.vmodel == "vinvl-r50c4-4setvg-bk":
     dim = 2048 + 5
     extractor = VinvlBackboneImageFeaturizer("vinvl-r50c4-5setvg", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze)
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes-bk-aimg":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer(
-      "vinvl", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze, True)
   elif args.vmodel == "vinvl_backbone":
     dim = 2048 + 5
     extractor = VinvlBackboneImageFeaturizer("vinvl", "release", BasicBoxEmbedder(), args.vfreeze)
@@ -137,22 +137,15 @@ def add_train_args(parser: ArgumentParser, batch_size=32, num_workers=6,
   parser.add_argument("--output_dir")
 
 
-# TODO move optimizer and warmup out of this method
-def run_train(args, model, logging_ema=0.99, sync_monitor=True,
-              epoch_end_hook=None, groups=None, vision_regex=None,
-              find_unused_parameters=True,
-              optimizer=None, scheduler=None
-              ):
-  if args.tasks == ["all"] or args.tasks == "all":
-    tasks = list(Task)
-  elif args.tasks == ["gpv1"]:
-    tasks = GPV1_TASKS
-  else:
-    tasks = [Task(x) for x in args.tasks]
-    if len(set(tasks)) != len(args.tasks):
-      raise ValueError("Given the same task multiple times")
+def run_train(args, model, **kwargs):
+  trainer = get_trainer_from_args(args, **kwargs)
+  run_trainer_from_args(trainer, model, args)
 
-  logging.info(f"Selected tasks: {[str(x) for x in tasks]}")
+
+def get_trainer_from_args(
+    args, optimizer, logging_ema=0.99, sync_monitor=True, vision_regex=None,
+    find_unused_parameters=True, scheduler=None
+) -> Trainer:
   batch_size, num_workers = args.batch_size, args.num_workers
 
   if args.debug:
@@ -173,6 +166,18 @@ def run_train(args, model, logging_ema=0.99, sync_monitor=True,
   if args.grad_accumulation != 1:
     logging.info(f"grad acc={args.grad_accumulation}")
 
+  if args.tasks == ["all"] or args.tasks == "all":
+    tasks = list(Task)
+  elif args.tasks == ["gpv1"]:
+    tasks = GPV1_TASKS
+  elif args.tasks == ["non-cls"]:
+    tasks = [x for x in Task if x != Task.CLS]
+  else:
+    logging.info(f"Selected tasks: {[str(x) for x in args.tasks]}")
+    tasks = [Task(x) for x in args.tasks]
+    if len(set(tasks)) != len(args.tasks):
+      raise ValueError("Given the same task multiple times")
+
   train_dataset = [
     TrainerDataset(
       GpvDataset(task, "train", True),
@@ -186,6 +191,14 @@ def run_train(args, model, logging_ema=0.99, sync_monitor=True,
       logging_name=str(task) + "-val",
     ) for task in tasks
   ]
+
+  best_model_key = [
+    evaluator.ResultKey("accuracy", dataset_name="cls-val"),
+    evaluator.ResultKey("score", dataset_name="vqa-val"),
+    evaluator.ResultKey("cider", dataset_name="cap-val"),
+    evaluator.ResultKey("AP", dataset_name="det-val"),
+  ]
+  best_model_key = [x for x in best_model_key if any(x.dataset_name.startswith(str(t)) for t in tasks)]
 
   if args.debug == "tiny":
     for x in train_dataset:
@@ -229,14 +242,6 @@ def run_train(args, model, logging_ema=0.99, sync_monitor=True,
         x.eval_sample = 8000
       else:
         x.eval_sample = 12000
-
-  best_model_key = [
-    evaluator.ResultKey("accuracy", dataset_name="cls-val"),
-    evaluator.ResultKey("score", dataset_name="vqa-val"),
-    evaluator.ResultKey("cider", dataset_name="cap-val"),
-    evaluator.ResultKey("AP", dataset_name="det-val"),
-  ]
-  best_model_key = [x for x in best_model_key if any(x.dataset_name.startswith(str(t)) for t in tasks)]
 
   evaluation = {
     Task.VQA: EvaluationSetup(
@@ -317,6 +322,9 @@ def run_train(args, model, logging_ema=0.99, sync_monitor=True,
     monitor_ema=logging_ema,
   )
 
-  devices = RunArgs.build(get_devices(args.device), args.force_one_worker, args.grad_accumulation)
+  return trainer
 
+
+def run_trainer_from_args(trainer, model, args):
+  devices = RunArgs.build(get_devices(args.device), args.force_one_worker, args.grad_accumulation)
   trainer.train(model, args.output_dir, devices, override=args.override)
