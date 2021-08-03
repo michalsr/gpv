@@ -16,8 +16,7 @@ import torchvision.transforms as T
 from exp.ours import file_paths
 from exp.ours.data.gpv_data import GPVExample, Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater, get_box_targets, \
-  ImageFeatureExtractor, \
-  ImageRegionFeatures, numpy_xyxy_to_cxcywh, numpy_xywh_to_cxcywh
+  ImageFeatureExtractor, ImageRegionFeatures, numpy_xyxy_to_cxcywh,extract_query_boxes
 from exp.ours.models.gpv1_preprocessing import get_stocastic_transforms
 from exp.ours.models.layers import Layer
 from exp.ours.util import image_utils, our_utils, py_utils
@@ -26,6 +25,7 @@ from exp.vinvl import transforms as vinvl_transforms
 from exp.vinvl.structures.bounding_box import BoxList
 from exp.vinvl.structures.image_list import to_image_list
 from torchvision.transforms import functional as F
+from torch.nn import functional as nn_F
 import numpy as np
 
 
@@ -190,15 +190,26 @@ class VinvlCollate(ImageCollater):
       image_tensors.append(img)
 
     if self.box_src:
+      # Load boxes from a hdf5 source
       targets = []
       objectness = []
       with h5py.File(self.box_src, "r") as f:
         for ex, sz in zip(batch, image_sizes):
           grp = f[image_utils.get_cropped_img_key(ex.image_id, ex.crop)]
           boxes = grp["bboxes"][:]
+          image_objectness = grp["objectness"][:]
+
+          if ex.query_boxes is not None:
+            qboxes, qobjectness = extract_query_boxes(
+              grp, ex.image_id, ex.query_boxes, "xyxy", sz, False)
+            boxes = np.concatenate([boxes, qboxes], 0)
+            image_objectness = np.concatenate([image_objectness, qobjectness], 0)
+
+          # Convert to un-normalized format expected by VinVL, boxes are already in the
+          # correct xyxy format
           boxes *= np.array([sz[0], sz[1], sz[0], sz[1]])[None, :]
+          objectness.append(torch.as_tensor(image_objectness))
           targets.append(BoxList(torch.as_tensor(boxes), sz))
-          objectness.append(torch.as_tensor(grp["objectness"][:]))
 
       out = [t(img, target) for img, target, t in zip(image_tensors, targets, transforms)]
       image_tensors, targets = py_utils.transpose_lists(out)
@@ -207,27 +218,30 @@ class VinvlCollate(ImageCollater):
       objectness = None
       image_tensors = [t(img, None)[0] for img, t in zip(image_tensors, transforms)]
 
-    query_boxes = []
-    for image_tensor, example, sz in zip(image_tensors, batch, image_sizes):
-      if example.query_boxes is None:
-        query_boxes.append(None)
-      else:
-        # Resize to be proportional to the transformed image's tenspr size in xyxy format, which is
-        # the expected format for VinVL's boxes
-        tensor_h, tensor_w = image_tensor.shape[-2:]
-        if np.all(example.query_boxes <= 1.0):
-          img_w, img_h = 1.0, 1.0  # Boxes are normalized
+    if self.box_src is None:
+      # Query boxes are recorded as seperate features so clients can extract
+      # features from them
+      query_boxes = []
+      for image_tensor, example, sz in zip(image_tensors, batch, image_sizes):
+        if example.query_boxes is None:
+          query_boxes.append(None)
         else:
-          img_w, img_h = sz  # Boxes are relative to original image size
-        size_f = np.array([tensor_w/img_w, tensor_h/img_h, tensor_w/img_w, tensor_h/img_h])[None, :]
-        boxes = torch.as_tensor(example.query_boxes * size_f, dtype=torch.float32)
-        query_boxes.append(torchvision.ops.box_convert(boxes, "xywh", "xyxy"))
+          # Resize to be proportional to the transformed image's tenspr size in xyxy format,
+          # which is the expected format for VinVL's boxes
+          tensor_h, tensor_w = image_tensor.shape[-2:]
+          if np.all(example.query_boxes <= 1.0):
+            img_w, img_h = 1.0, 1.0  # Boxes are normalized
+          else:
+            img_w, img_h = sz  # Boxes are relative to original image size
+          size_f = np.array([tensor_w/img_w, tensor_h/img_h, tensor_w/img_w, tensor_h/img_h])[None, :]
+          boxes = torch.as_tensor(example.query_boxes * size_f, dtype=torch.float32)
+          query_boxes.append(torchvision.ops.box_convert(boxes, "xywh", "xyxy"))
+    else:
+      # Query boxes are automatically appended to the other boxes
+      query_boxes = None
 
     images = to_image_list(image_tensors)
-    out = dict(images=images, targets=targets)
-    if objectness is not None:
-      out["objectness"] = our_utils.stack_and_pad(objectness, pad=-100000)
-    out["query_boxes"] = query_boxes
+    out = dict(images=images, targets=targets, objectness=objectness, query_boxes=query_boxes)
     box_targets = get_box_targets(batch, [x[::-1] for x in image_sizes])
     return out, box_targets
 
@@ -288,13 +302,8 @@ class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
     features = self.backbone(images.tensors)
     device = images.tensors.device
 
-    for i, q_box in enumerate(query_boxes):
-      if q_box is not None:
-        boxes = targets[i]
-        boxes.bbox = torch.cat([boxes.bbox, q_box], 0)
-        # Its not really clear how to handle objectness for the query boxes,
-        # currently we just allow the objectness to be shorter than the number of boxes
-        # and trust the client won't try to naively use the objectness of query boxes
+    if query_boxes is not None:
+      raise ValueError()
 
     features = self.feature_extractor(features, targets)
     features = self.pool(features)
@@ -306,10 +315,10 @@ class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
       w, h = bbox.size
       boxes = bbox.bbox
       boxes = boxes/torch.as_tensor([w, h, w, h], dtype=bbox.bbox.dtype, device=device).unsqueeze(0)
-      boxes = torchvision.ops.box_convert(boxes, bbox.mode, "cxcywh")
       # Clip since floating point issues can cause boxes to slightly exceed 1
       boxes[:, 2] = torch.clip(boxes[:, 2], 0, 1)
       boxes[:, 3] = torch.clip(boxes[:, 3], 0, 1)
+      boxes = torchvision.ops.box_convert(boxes, bbox.mode, "cxcywh")
       all_boxes.append(boxes)
 
     out = ImageRegionFeatures.build_from_lists(all_boxes, all_features, objectness)

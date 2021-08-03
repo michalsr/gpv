@@ -33,6 +33,11 @@ class GPVExampleOutput:
     return GPVExampleOutput(self.boxes, self.relevance, self.text[:n], self.text_logprobs[:n])
 
 
+class PredictionArg(Registrable):
+  """Generic super-type for typed prediction arguements"""
+  pass
+
+
 class GPVModel(nn.Module, Registrable):
 
   def initialize(self):
@@ -60,6 +65,13 @@ class GPVModel(nn.Module, Registrable):
 
   def predict(self, *args, **kwargs) -> List[GPVExampleOutput]:
     """Computes the test-time example outputs for a batch of examples"""
+    raise NotImplementedError()
+
+  def set_prediction_args(
+      self, *args: Union[str, int, float, PredictionArg],
+      **kwargs: Union[str, int, float, PredictionArg]
+  ):
+    """Sets parameters used during prediction"""
     raise NotImplementedError()
 
   def preprocess_example_train(self, example) -> List[GPVExample]:

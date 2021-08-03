@@ -70,8 +70,8 @@ def t5_initialize_decoding(tokenizer, model, encoder_out, encoder_mask, post_pro
     encoder_outputs=encoder_out
   )
 
-  def _decode_step(predictions, prev_state):
-    return _t5_decoding_step(model, predictions, prev_state, post_process)
+  def _decode_step(predictions, prev_state, time_step):
+    return _t5_decoding_step(model, predictions, prev_state, post_process, time_step)
 
   initial_out = torch.full(
     (batch_size,), tokenizer.pad_token_id, dtype=torch.long, device=device)
@@ -79,7 +79,7 @@ def t5_initialize_decoding(tokenizer, model, encoder_out, encoder_mask, post_pro
   return initial_out, initial_state, _decode_step
 
 
-def _t5_decoding_step(model, predictions, state, post_process):
+def _t5_decoding_step(model, predictions, state, post_process, time_step):
   past = py_utils.flat_to_nested_struct({k: v.contiguous() for k, v in state.items()
                                          if isinstance(k, tuple)})
   model_inputs = model.prepare_inputs_for_generation(
@@ -94,7 +94,7 @@ def _t5_decoding_step(model, predictions, state, post_process):
   logits = F.log_softmax(logits, -1)
 
   if post_process is not None:
-    logits = post_process(logits, model_inputs)
+    logits = post_process(logits, model_inputs, time_step)
 
   next_state = dict(
     encoder_mask=state["encoder_mask"],

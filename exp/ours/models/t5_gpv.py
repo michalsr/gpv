@@ -94,10 +94,12 @@ class T5GPV(GPVModel):
       freeze_embed=False,
       initialize_joiner="coco",
       nms: float=0.0,
+      all_lower_case=False
   ):
     super().__init__()
     if freeze_embed and image_seperator:
       raise NotImplementedError()
+    self.all_lower_case = all_lower_case
     self.image_relevance = image_relevance
     self.freeze_embed = freeze_embed
     self.t5_model_name = t5_model_name
@@ -109,7 +111,6 @@ class T5GPV(GPVModel):
     self.pre_tokenize = pre_tokenize
     self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
-    self.nms = nms
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
 
@@ -132,7 +133,14 @@ class T5GPV(GPVModel):
     self.model = None
     self.obj_cls = None
 
+    # Prediction arguements
+    self.nms = nms
+    self.beam_search_spec = None
+    self.register_buffer("mask", None)
+
   def _pre_tokenize(self, text: str) -> Union[str, np.ndarray]:
+    if self.all_lower_case:
+      text = text.lower()
     if self.pre_tokenize:
       return np.array(encode_with_cache(text, self.tokenizer, self.tokenizer_cache))
     else:
@@ -199,10 +207,10 @@ class T5GPV(GPVModel):
     super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
   def preprocess_example_train(self, example):
-    return self.preprocesser.preprocess_example(example, True, self.query_box)
+    return self.preprocesser.preprocess_example(example, True, self.query_box is not None)
 
   def preprocess_example(self, example, is_train=False):
-    return self.preprocesser.preprocess_example(example, is_train, self.query_box)
+    return self.preprocesser.preprocess_example(example, is_train, self.query_box is not None)
 
   def get_collate(self, is_train=False):
     n_pos = self.model.config.n_positions
@@ -237,6 +245,7 @@ class T5GPV(GPVModel):
 
   def _encode(self, image_inputs, input_ids, input_mask):
     image: ImageRegionFeatures = self.image_feature_extractor(**image_inputs)
+
     device = image.features.device
 
     if isinstance(self.image_joiner, Linear):
@@ -273,7 +282,8 @@ class T5GPV(GPVModel):
 
     if self.query_box == "always":
       # Remove the query box so our output only contains the object boxes
-      image.n_boxes = image.n_boxes - 1
+      if image.n_boxes is not None:
+        image.n_boxes = image.n_boxes - 1
       image.boxes = image.boxes[:, :-1]
       image.features = image.features[:, :-1]
       image.objectness = image.objectness[:, :-1]
@@ -328,43 +338,68 @@ class T5GPV(GPVModel):
                               rel, n_boxes, box_targets, tasks)
     return loss, monitor
 
+  def set_prediction_args(
+      self,
+      beam_search_spec: BeamSearchSpec=None,
+      answer_options=None, mask=None, nms=None
+  ):
+    self.beam_search_spec = beam_search_spec
+    if nms is not None:
+      self.nms = nms
+
+    voc_len = self.model.config.vocab_size
+    device = our_utils.get_model_device(self)
+
+    if mask is not None:
+      words = mask.get_target_words()
+      tensor_mask = np.zeros([voc_len], dtype=np.bool)
+      for word in words:
+        tensor_mask[encode_with_cache(word, self.tokenizer, self.tokenizer_cache)] = True
+      for word in ID_TO_COCO_CATEGORY.values():
+        if word not in words:
+          tensor_mask[encode_with_cache(word, self.tokenizer, self.tokenizer_cache)] = False
+      tensor_mask[self.tokenizer.eos_token_id] = mask.target_eos()
+      tensor_mask = torch.as_tensor(tensor_mask, device=device)
+      self.register_buffer("mask", tensor_mask.float() * mask.val)
+    else:
+      self.register_buffer("mask", None)
+
+    if answer_options is not None:
+      eos = self.tokenizer.eos_token_id
+      tokenized = [encode_with_cache(x, self.tokenizer, self.tokenizer_cache) + [eos]
+                   for x in answer_options]
+      answer_mask = np.zeros((max(len(x) for x in tokenized), voc_len), dtype=np.bool)
+      for tok in tokenized:
+        answer_mask[np.arange(len(tok)), tok] = True
+      answer_mask = torch.as_tensor(answer_mask, device=device).float()
+      # Word pieces that can never be part of an answer option get a large negative weight
+      answer_mask = (1 - answer_mask) * -1e9
+      if self.mask is not None:
+        answer_mask = answer_mask + self.mask.unsqueeze(0)
+      self.register_buffer("mask", answer_mask)
+
   def predict(
       self, image_inputs, input_ids, input_mask, labels=None,
       box_targets=None, tasks=None,
-      allennlp_spec: BeamSearchSpec=None,
-      predict_text=True, mask=None, nms=None
   ):
     task = tasks[0]
     if not all(x == task for x in tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
 
-    if mask is not None:
-      buffer_str = f"_{mask.get_name()}_{str(task)}"
-      if not hasattr(self, buffer_str):
-        words = mask.get_target_words(task)
-        voc_len = self.model.config.vocab_size
-        tensor_mask = np.zeros([voc_len], dtype=np.bool)
-        for word in words:
-          tensor_mask[encode_with_cache(word, self.tokenizer, self.tokenizer_cache)] = True
-        tensor_mask[self.tokenizer.eos_token_id] = mask.target_eos()
-        tensor_mask = torch.as_tensor(tensor_mask, device=input_ids.device)
-        self.register_buffer(buffer_str, tensor_mask)
-      tensor_mask = getattr(self, buffer_str)
-      tensor_mask = tensor_mask.float() * mask.val
-    else:
-      tensor_mask = None
-
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
     rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
     rel = rel.softmax(-1)[:, :, 0]
 
-    if predict_text:
-      if tensor_mask is None:
+    if self.beam_search_spec is not None:
+      if self.mask is None:
         post_process = None
       else:
-        def post_process(logits, _):
-          return F.log_softmax(logits + tensor_mask, -1)
-      bs = allennlp_spec.build(self.tokenizer.eos_token_id)
+        def post_process(logits, _, time_step):
+          if len(self.mask.size()) == 1:
+            return F.log_softmax(logits + self.mask, -1)
+          else:
+            return F.log_softmax(logits + self.mask[time_step], -1)
+      bs = self.beam_search_spec.build(self.tokenizer.eos_token_id)
       decode_init = t5_initialize_decoding(
         self.tokenizer, self.model, encoder_outputs[0], input_mask, post_process)
       input_ids, logprobs = bs.search(*decode_init)
@@ -377,13 +412,11 @@ class T5GPV(GPVModel):
     else:
       out_text, logprobs = None, None
 
-    if nms is None:
-      nms = self.nms
-    if nms is not None and nms > 0.0:
+    if self.nms is not None:
       for i in range(image_features.boxes.size(0)):
         boxes = image_features.boxes[i]
         boxes = torchvision.ops.box_convert(boxes, "cxcywh", "xyxy")
-        keep = torchvision.ops.nms(boxes, rel[i], nms)
+        keep = torchvision.ops.nms(boxes, rel[i], self.nms)
         to_subtract = torch.full_like(rel[i], 10000)
         to_subtract[keep] = 0
         rel[i] -= to_subtract
