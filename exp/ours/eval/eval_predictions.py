@@ -41,7 +41,7 @@ def find_eval_files(run_dir, prefix):
       output[eval_name].append((subdir, None if n_sample == 0 else n_sample))
 
   def _get_order(x):
-    return np.inf if x[1] is None else x[1]
+    return x[1]
 
   consolidated_out = {}
   for k, v in output.items():
@@ -109,8 +109,7 @@ def get_evaluator(dataset):
     Task.VQA: VqaEvaluator(),
     Task.CAPTIONING: CaptionEvaluator(per_caption=per_caption, bleu=None),
     Task.DETECTION: DetectionEvaluator(),
-    Task.CLS: ClsEvaluator(),
-    Task.CLS_IN_CONTEXT: ClsEvaluator()
+    Task.CLS: ClsEvaluator()
   }[dataset.get_task()]
   return evaluator, get_subsets
 
@@ -258,10 +257,9 @@ def main():
   sorted_all_table = {}
   for row_name, row in all_table.items():
     sorted_row = {}
-    for task in [Task.VQA, Task.CAPTIONING, Task.DETECTION, Task.CLS, Task.CLS_IN_CONTEXT]:
+    for task in [Task.VQA, task.CAPTIONING, Task.DETECTION, Task.CLS]:
       for subset in [None, "seen", "unseen"]:
-        metric = {Task.VQA: "score", Task.DETECTION: "AP", Task.CLS: "accuracy",
-                  Task.CAPTIONING: "cider", Task.CLS_IN_CONTEXT: "accuracy"}[task]
+        metric = {Task.VQA: "score", Task.DETECTION: "AP", Task.CLS: "accuracy", Task.CAPTIONING: "cider"}[task]
         k = task.value + "/" + str(ResultKey(metric, subset))
         if k in row:
           sorted_row[k] = row[k]

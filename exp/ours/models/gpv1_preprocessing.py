@@ -1,8 +1,9 @@
 from allennlp.common import FromParams
+from dataclasses import replace
 
 from exp.ours.data.gpv_data import GPVExample, Task
 from exp.ours.data.source_data import CocoCaptions, CocoBBoxes, CocoBoxClsExample, VqaQuestion, \
-  CocoBoxIdentificationExample, ClassWebClsExample
+  CocoBoxIdentificationExample, ClassWebClsExample, WebQaExample
 import torchvision.transforms as T
 import numpy as np
 
@@ -164,7 +165,16 @@ class Gpv1Preprocessor(FromParams):
         query_boxes=all_image_box,
         target_answer=self.preprocess_text(answer)
       )]
-    elif isinstance(example, (CocoBoxClsExample, CocoBoxIdentificationExample, ClassWebClsExample)):
+    elif isinstance(example, GPVExample):
+      # Currently assume the query and answer are just text
+      assert isinstance(example.query, str)
+      assert isinstance(example.target_answer, str)
+      out = [replace(
+        example,
+        query=[self.preprocess_text(example.query)],
+        target_answer=self.preprocess_text(example.target_answer)
+      )]
+    elif isinstance(example, (CocoBoxClsExample, CocoBoxIdentificationExample)):
       out = [GPVExample(
         example.get_gpv_id(),
         Task.CLS_IN_CONTEXT if isinstance(example, CocoBoxIdentificationExample) else Task.CLS,

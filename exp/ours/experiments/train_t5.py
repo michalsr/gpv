@@ -3,15 +3,18 @@ import os
 
 from transformers import AutoConfig
 
+from exp.ours.data.webqa import Web80QaDataset
+from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
 from exp.ours.models.model_utils import BackboneParameterExtractor
+from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-from exp.ours.experiments.cli_train import *
+from exp.ours.experiments.trainer_cli import *
 from exp.ours.data.gpv_data import Task
 from exp.ours.models.t5_gpv import T5GPV
 from exp.ours.util import py_utils
@@ -23,9 +26,9 @@ def main():
   parser.add_argument("--lr", type=float, default=3e-4)
   parser.add_argument("--vlr", type=float)
   parser.add_argument("--vwarmup", type=float, default=0.1)
-  parser.add_argument("--localization_loss", choices=["detr", "boxcls"], default="detr")
   parser.add_argument("--weight_decay", type=float, default=1e-4)
   parser.add_argument("--delay", type=float, default=0.0)
+
   add_image_featurizer_args(parser, vfreeze="all", vmodel="detr_boxes")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -45,22 +48,14 @@ def main():
   conf = AutoConfig.from_pretrained(args.model)
   t5_dim = conf.d_model
 
-  joiner = Linear(image_dim, t5_dim)
-
-  losses = ['labels'] if args.vmodel == "detr_model" else ['labels', 'boxes']
-  if args.localization_loss == "detr":
-    localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, losses)
-  else:
-    localization_loss = BoxClsLoss(0.5)
-
+  localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, ['labels', 'boxes'])
   model = T5GPV(
     args.model,
-    loss=BasicGPVLoss(1, 1, 1, 1, localization_loss, False),
+    loss=BasicGPVLoss(1, 1, 1, 1, 1, localization_loss, False),
     image_feature_extractor=image_featurizer,
-    image_joiner=joiner,
+    image_joiner=Linear(image_dim, t5_dim),
     pre_tokenize=True,
-    nms=0.5 if isinstance(localization_loss, BoxClsLoss) else 0.0,
-    image_relevance=SumWithObjectness(t5_dim*2, objectness_factor=True),
+    image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
     query_box="always",
     all_lower_case=False
   )
@@ -90,11 +85,25 @@ def main():
   print("Optimizer:")
   print(json.dumps(to_params(optimizer, OptimizerBuilder), indent=2))
 
-  run_train(
-    args, model, logging_ema=0.995,
-    find_unused_parameters=True,
+  trainer = get_trainer_from_args(
+    args, logging_ema=0.995, find_unused_parameters=True,
     optimizer=optimizer, scheduler=scheduler
   )
+
+  # Add the WebQaDataset we want to experiment with
+  trainer.train_datasets.append(TrainerDataset(
+    Web80QaDataset(100 if args.debug else None, "train"), "webqa-tr"
+  ))
+  trainer.eval_datasets.append(TrainerDataset(
+    Web80QaDataset(100 if args.debug else None, "val"), "webqa-val"
+  ))
+  trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
+  trainer.evaluation[Task.WEBQA] = EvaluationSetup(
+    evaluator.WebQaEvaluator(),
+    dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=WebQa80Answers())
+  )
+
+  run_trainer_from_args(trainer, model, args)
 
 
 if __name__ == '__main__':

@@ -1,12 +1,12 @@
 import argparse
 import json
 
-from exp.ours.experiments.cli_train import add_train_args, run_train, add_image_featurizer_args, \
-  get_image_featurizer
+from exp.ours.experiments.trainer_cli import add_train_args, run_train, get_trainer_from_args
+from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.gpv1 import GPV1
 from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.models.layers import *
-from exp.ours.models.model_utils import UnfreezeVisionFeatureExtractor, BackboneParameterExtractor, DetrParameterExtractor
+from exp.ours.models.model_utils import BackboneParameterExtractor, DetrParameterExtractor
 from exp.ours.train.optimizer_builder import *
 from exp.ours.util import py_utils
 from exp.ours.util.to_params import to_params
@@ -70,9 +70,7 @@ def main():
   print("Optimizer:")
   print(json.dumps(to_params(optimizer, OptimizerBuilder), indent=2))
 
-  run_train(args, model, vision_regex=r".*image_feature_extractor\..*",
-            logging_ema=0.995,
-            optimizer=optimizer, scheduler=scheduler)
+  get_trainer_from_args(args, logging_ema=0.995, optimizer=optimizer, scheduler=scheduler)
 
 
 if __name__ == '__main__':

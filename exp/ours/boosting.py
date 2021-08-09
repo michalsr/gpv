@@ -1,9 +1,11 @@
+import json
 from typing import List
 
 from allennlp.common import Registrable
 from dataclasses import dataclass
 
 from data.coco.synonyms import SYNONYMS
+from exp.ours import file_paths
 from exp.ours.data.dataset import GpvDataset
 from exp.ours.data.gpv_data import Task
 from exp.ours.data.source_data import ID_TO_COCO_CATEGORY
@@ -27,6 +29,13 @@ class MaskSpec(PredictionArg):
 class CocoCategories(PredictionArg, list):
   def __init__(self):
     super().__init__(ID_TO_COCO_CATEGORY.values())
+
+
+@PredictionArg.register("webqa-list")
+class WebQa80Answers(PredictionArg, list):
+  def __init__(self):
+    with open(file_paths.WEBQA80_ANSWERS) as f:
+      super().__init__(json.load(f))
 
 
 @PredictionArg.register("coco-cat-voc")

@@ -151,7 +151,7 @@ class BasicGPVLoss(GPVLoss):
 
   def __init__(
       self,
-      cap_w: float, vqa_w: float, cls_w: float, ident_w: float,
+      cap_w: float, vqa_w: float, cls_w: float, ident_w: float, webqa_w: float,
       localization: LocalizationLoss, sum_seq_tokens
   ):
     super().__init__()
@@ -159,13 +159,15 @@ class BasicGPVLoss(GPVLoss):
     self.cap_w = cap_w
     self.cls_w = cls_w
     self.ident_w = ident_w
+    self.webqa_w = webqa_w
     self.localization = localization
     self.sum_seq_tokens = sum_seq_tokens
     self.ce_weight_table = {
       Task.CAPTIONING: cap_w,
       Task.VQA: vqa_w,
       Task.CLS: cls_w,
-      Task.CLS_IN_CONTEXT: ident_w
+      Task.CLS_IN_CONTEXT: ident_w,
+      Task.WEBQA: webqa_w,
     }
 
   def forward(self, logits, labels, pred_boxes, pred_rel, n_boxes, box_targets, tasks):

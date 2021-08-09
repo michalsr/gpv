@@ -1,121 +1,20 @@
-import logging
 from argparse import ArgumentParser
 
-from exp.ours.boosting import CocoCategories
+from exp.ours.boosting import CocoCategories, WebQa80Answers
 from exp.ours.data.dataset import GpvDataset
-from exp.ours.experiments.cli_utils import MarkIfNotDefault
 from exp.ours.image_featurizer.image_featurizer import *
-from exp.ours.image_featurizer import vinvl_featurizer
-from exp.ours.image_featurizer import detr_featurizer
-from exp.ours.image_featurizer.vinvl_featurizer import VinvlBackboneImageFeaturizer
-from exp.ours.models.layers import DetrBackbone, LayerNorm, BasicBoxEmbedder, \
-  NonLinearCoordinateEncoder
 from exp.ours.util.our_utils import get_devices
 from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
 from exp.ours.train import evaluator
-from exp.ours.train import optimizer_builder
 from exp.ours.train.trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
 
-from exp.ours.data.gpv_data import Task, GPV1_TASKS
-
-
-def add_image_featurizer_args(parser: ArgumentParser, vfreeze="none", vmodel=None):
-  parser.add_argument("--vmodel", default=vmodel)
-  parser.add_argument("--vfreeze", default=vfreeze)
-
-
-def _freeze_detr(vfreeze):
-  freeze_extractor = False
-  if vfreeze is None or vfreeze == "none":
-    freeze_backbone = None
-  elif vfreeze == "conv1":
-    freeze_backbone = "conv1"
-  else:
-    freeze_backbone = "all"
-    if vfreeze == "backbone":
-      freeze_extractor = False
-    elif vfreeze == "all":
-      freeze_extractor = True
-    else:
-      raise NotImplementedError()
-  return freeze_backbone, freeze_extractor
-
-
-def get_image_featurizer(args):
-  if args.vmodel == "detr_model":
-    freeze_backbone, freeze_extractor = _freeze_detr(args.vfreeze)
-    dim = 2304
-    extractor = detr_featurizer.PretrainedDetrFeaturizer(
-      freeze_backbone=freeze_backbone, freeze_extractor=freeze_extractor)
-  elif args.vmodel == "faster_rcnn":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("faster-rcnn", "xyxy", BasicBoxEmbedder())
-  elif args.vmodel in {"dbg", "debug"}:
-    dim = 32
-    extractor = DebugFeaturizer(4, 32)
-  elif args.vmodel == "vinvl-precomputed":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2054
-    extractor = vinvl_featurizer.VinVLPrecomputedFeatures()
-  elif args.vmodel == "dbg-hdf5":
-    dim = 2048
-    extractor = Hdf5FeatureExtractor("dbg")
-  elif args.vmodel == "vinvl":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2048
-    extractor = Hdf5FeatureExtractor("vinvl")
-  elif args.vmodel == "web-vinvl":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("web-features", box_embedder=BasicBoxEmbedder())
-  elif args.vmodel == "vinvl-r50c4-4setvg":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl-r50c4-4setvg", "xyxy", BasicBoxEmbedder())
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes":
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl-r50c4-4setvg-rboxes", box_embedder=BasicBoxEmbedder())
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes-all-image":
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl-r50c4-4setvg-rboxes-all-image", box_embedder=BasicBoxEmbedder(),
-                                     all_image_box=True, all_image_prior=-10000)
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes-bk":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer(
-      "vinvl", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze, train_transform="gpv1")
-  elif args.vmodel == "vinvl-r50c4-4setvg-bk":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer("vinvl-r50c4-5setvg", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze)
-  elif args.vmodel == "vinvl_backbone":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer("vinvl", "release", BasicBoxEmbedder(), args.vfreeze)
-  elif args.vmodel in {"detr_boxes", "vinvl_boxes"}:
-    dim = 2048 + 4*7
-    extractor = FromPrecomputedBoxes(
-      {"detr_boxes": "detr-coco-sce", "vinvl_boxes": "vinvl-boxes"}[args.vmodel],
-      DetrBackbone(freeze=args.vfreeze),
-      feature_extractor=BoxEmbedFeatureExtractor(
-        box_coordinate_embed=NonLinearCoordinateEncoder([0.1, 0.05, 0.02]),
-        post_rio=LayerNorm(),
-      ),
-      include_all_image_box=True,
-      horizontal_flip=0.5,
-      preload_bboxes=True,
-    )
-  else:
-    raise NotImplementedError(args.vmodel)
-  return extractor, dim
+from exp.ours.data.gpv_data import Task, GPV1_TASKS, GPV2_TASKS
+from exp.ours.util.py_utils import MarkIfNotDefault
 
 
 def add_train_args(parser: ArgumentParser, batch_size=32, num_workers=6,
-                   epochs=40, tasks="all", clip_grad_norm=0.1):
-  parser.add_argument("--tasks", nargs="+", default=tasks)
+                   epochs=40, tasks="all", clip_grad_norm=None):
+  parser.add_argument("--task", nargs="+", default=tasks)
 
   # Performance args
   parser.add_argument("--device", nargs="+", default=None)
@@ -125,9 +24,9 @@ def add_train_args(parser: ArgumentParser, batch_size=32, num_workers=6,
   parser.add_argument("--nopin_memory", action="store_true")
   parser.add_argument("--num_workers", default=num_workers, type=int, action=MarkIfNotDefault)
 
-  parser.add_argument("--clip_grad_norm", default=clip_grad_norm, type=float)
 
   # Other training args
+  parser.add_argument("--clip_grad_norm", default=clip_grad_norm, type=float)
   parser.add_argument("--batch_size", default=batch_size, type=int, action=MarkIfNotDefault)
   parser.add_argument("--epochs", default=epochs, type=int)
   parser.add_argument("--debug", choices=["tiny", "small", "med", "large"], default=None)
@@ -167,42 +66,34 @@ def get_trainer_from_args(
   if args.grad_accumulation != 1:
     logging.info(f"grad acc={args.grad_accumulation}")
 
-  if args.tasks == ["all"] or args.tasks == "all":
-    tasks = list(Task)
-  elif args.tasks == ["gpv1"]:
-    tasks = GPV1_TASKS
-  elif args.tasks == ["non-cls"]:
-    tasks = [x for x in Task if x != Task.CLS]
-  else:
-    logging.info(f"Selected tasks: {[str(x) for x in args.tasks]}")
-    tasks = [Task(x) for x in args.tasks]
-    if len(set(tasks)) != len(args.tasks):
-      raise ValueError("Given the same task multiple times")
+  tasks = {}  # Use a dictionary to preserve ordering
+  for dataset in args.task:
+    if dataset == "gpv1":
+      tasks.update({x: None for x in GPV1_TASKS})
+    elif dataset == "gpv2":
+      tasks.update({x: None for x in GPV2_TASKS})
+    elif dataset == "non-cls":
+      tasks.update({x: None for x in [Task.VQA, Task.CAPTIONING, Task.DETECTION]})
+    else:
+      tasks[Task(dataset)] = None
 
-  train_dataset = [
-    TrainerDataset(
-      GpvDataset(task, "train", True),
-      logging_name=str(task) + "-tr",
-    ) for task in tasks
-  ]
-
-  eval_datasets = [
-    TrainerDataset(
-      GpvDataset(task, "val", True),
-      logging_name=str(task) + "-val",
-    ) for task in tasks
-  ]
+  train_datasets = []
+  eval_datasets = []
+  for task in tasks:
+    train_datasets.append(TrainerDataset(GpvDataset(task, "train", True), str(task) + "-tr"))
+    eval_datasets.append(TrainerDataset(GpvDataset(task, "val", True), str(task) + "-val"))
 
   best_model_key = [
     evaluator.ResultKey("accuracy", dataset_name="cls-val"),
     evaluator.ResultKey("score", dataset_name="vqa-val"),
     evaluator.ResultKey("cider", dataset_name="cap-val"),
     evaluator.ResultKey("AP", dataset_name="det-val"),
+    evaluator.ResultKey("accuracy", dataset_name="webqa-val"),
   ]
   best_model_key = [x for x in best_model_key if any(x.dataset_name.startswith(str(t)) for t in tasks)]
 
   if args.debug == "tiny":
-    for x in train_dataset:
+    for x in train_datasets:
       x.dataset.sample = 5
       x.eval_sample = 4
     for x in eval_datasets:
@@ -210,7 +101,7 @@ def get_trainer_from_args(
       x.eval_sample = 4
 
   elif args.debug == "small":
-    for x in train_dataset:
+    for x in train_datasets:
       x.dataset.sample = 120
       x.eval_sample = 30
     for x in eval_datasets:
@@ -218,7 +109,7 @@ def get_trainer_from_args(
       x.eval_sample = 30
 
   elif args.debug == "med":
-    for x in train_dataset:
+    for x in train_datasets:
       x.dataset.sample = 2000
       x.eval_sample = 500
     for x in eval_datasets:
@@ -226,14 +117,14 @@ def get_trainer_from_args(
       x.eval_sample = 500
 
   elif args.debug == "large":
-    for x in train_dataset:
+    for x in train_datasets:
       x.dataset.sample = 10000
       x.eval_sample = 2000
     for x in eval_datasets:
       x.eval_sample = 2000
 
   else:
-    for x in train_dataset:
+    for x in train_datasets:
       if x.dataset.get_task() == Task.CAPTIONING:
         x.eval_sample = 5000
       else:
@@ -264,17 +155,16 @@ def get_trainer_from_args(
     Task.CLS_IN_CONTEXT: EvaluationSetup(
       evaluator.ClsEvaluator(),
       dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=CocoCategories())
-    )
+    ),
   }
-
-  if scheduler is None:
-    raise ValueError()
 
   train_loader = DataLoaderBuilder(batch_size, num_workers, not args.nopin_memory,
                                    prefetch_factor=2, persist_workers=num_workers > 0)
 
+  # other_log specifies additional tensorboard logging outputs, we use it to
+  # have a second tab with results grouped by train/eval rather than by dataset
   other_log = {}
-  evals = [(x, True) for x in train_dataset] + [(x, False) for x in eval_datasets]
+  evals = [(x, True) for x in train_datasets] + [(x, False) for x in eval_datasets]
   for ds, is_train in evals:
     task = ds.dataset.get_task()
     if task == Task.CAPTIONING:
@@ -289,13 +179,15 @@ def get_trainer_from_args(
       metric_name, name = "AP", "loc"
     elif task == Task.CLS_IN_CONTEXT:
       metric_name, name = "accuracy", "ident"
+    elif task == Task.WEBQA:
+      metric_name, name = "accuracy", "webqa"
     else:
       raise RuntimeError()
     name = f"train-evals/{name}" if is_train else f"val-evals/{name}"
     other_log[evaluator.ResultKey(metric_name=metric_name, dataset_name=ds.get_name())] = name
 
   trainer = Trainer(
-    train_dataset,
+    train_datasets,
     eval_datasets,
     evaluation,
     optimizer,
@@ -313,7 +205,7 @@ def get_trainer_from_args(
     epochs=args.epochs,
     best_model_key=best_model_key,
     clip_grad_norm=args.clip_grad_norm,
-    tb_log_intervals=10,
+    tb_log_intervals=20,
     clip_grad_norm_re=vision_regex,
     sort_train=False,
     checkpoint=True,

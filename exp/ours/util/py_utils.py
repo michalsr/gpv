@@ -2,6 +2,7 @@ import logging
 import re
 import sys
 import zlib
+from argparse import Action
 from multiprocessing import Lock, Pool
 
 import regex
@@ -364,3 +365,17 @@ class ReplaceAll:
   def replace(self, target: str) -> str:
     # The first group matches the non-word prefix, which we keep, the second is the replacement string
     return self.pattern.sub(lambda match: match.group(1) + self.replacements[match.group(2)], target)
+
+
+# TODO can we avoid have set an extra attribute?
+class MarkIfNotDefault(Action):
+  """Action for argparse that signal if a default was changed"""
+
+  def __init__(self, option_strings, dest, nargs=None, **kwargs):
+    super().__init__(option_strings, dest, nargs, **kwargs)
+
+  def __call__(self, parser, namespace, values, option_string=None):
+    setattr(namespace, self.dest, values)
+    assert not hasattr(namespace, f"{self.dest}_is_default")
+    setattr(namespace, f"{self.dest}_not_default", True)
+
