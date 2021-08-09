@@ -21,6 +21,7 @@ def get_coco_categories():
 
 ID_TO_COCO_CATEGORY = {x["id"]: x["name"] for x in get_coco_categories()}
 COCO_CATEGORY_TO_ID = {v: k for k, v in ID_TO_COCO_CATEGORY.items()}
+COCO_CATEGORIES = [x[1] for x in sorted(ID_TO_COCO_CATEGORY.items(), key=lambda x: x[0])]
 
 
 def load_instances(kind, split, gpv_split=True) -> List[Dict]:
