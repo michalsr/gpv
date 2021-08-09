@@ -48,6 +48,10 @@ def get_image_file(image_id):
       raise ValueError(f"Missing file {image_file} for image {image_id}")
     return image_file
 
+  if isinstance(image_id, str):
+    # Assume string ids are web images
+    return join(file_paths.WEB_IMAGES_DIR, image_id)
+
   global _IMAGE_ID_TO_FILE_MAP
   if _IMAGE_ID_TO_FILE_MAP is None:
     _IMAGE_ID_TO_FILE_MAP = _build_image_file_map()

@@ -8,6 +8,7 @@ from pycocoevalcap.cider.cider import Cider
 
 import third_party.detection_metrics.lib.Evaluator as det_evaluator
 from data.coco.synonyms import SYNONYMS
+from exp.ours.data.gpv_data import GPVExample
 
 from exp.ours.data.source_data import CocoCaptions, VqaQuestion, CocoBoxClsExample, CocoBBoxes
 from exp.ours.util.image_utils import get_image_size
@@ -129,6 +130,17 @@ class ClsEvaluator(PerExampleEvaluator):
     for example in examples:
       answer = predictions[example.get_gpv_id()].text[0].lower()
       gt_answer = SYNONYMS[example.category]
+      out.append(dict(accuracy=answer in gt_answer))
+    return out
+
+
+@Evaluator.register("webqa-evaluator")
+class WebQaEvaluator(PerExampleEvaluator):
+  def evaluate_examples(self, examples: List[GPVExample], predictions: Dict[str, GPVExampleOutput]):
+    out = []
+    for example in examples:
+      answer = predictions[example.get_gpv_id()].text[0].lower()
+      gt_answer = SYNONYMS[example.target_answer] if example.target_answer in SYNONYMS else [example.target_answer]
       out.append(dict(accuracy=answer in gt_answer))
     return out
 

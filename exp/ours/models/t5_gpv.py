@@ -27,7 +27,7 @@ from exp.ours.util.to_params import to_params
 def _fix_old_params(params: Params):
   if "loss" not in params:
     params["loss"] = to_params(BasicGPVLoss(
-      1.0, None, None, None, None, None, None, sum_seq_tokens=False), GPVLoss)
+      1.0, None, None, None, None, None, None, None, sum_seq_tokens=False), GPVLoss)
 
   if params.pop("aux_obj_cls") is not None:
     raise ValueError()

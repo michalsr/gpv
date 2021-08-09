@@ -61,7 +61,7 @@ class GpvDataset(Dataset):
     Task.CLS: source_data.load_gpv_cls,
     Task.CLS_IN_CONTEXT: source_data.load_gpv_ident,
     Task.CAPTIONING: source_data.load_gpv_captioning,
-    Task.DETECTION: source_data.load_gpv_boxes
+    Task.DETECTION: source_data.load_gpv_boxes,
   }
 
   UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
@@ -74,7 +74,7 @@ class GpvDataset(Dataset):
     Task.CLS: UNSEEN2,
     Task.CLS_IN_CONTEXT: UNSEEN2,
     Task.CAPTIONING: UNSEEN1,
-    Task.DETECTION: UNSEEN2
+    Task.DETECTION: UNSEEN2,
   }
 
   def __init__(self, task: Task, split: str, gpv_split=True,

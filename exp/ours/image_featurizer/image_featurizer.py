@@ -470,7 +470,7 @@ class MultiHdf5FeatureExtractorCollate(ImageCollater):
   output_box_format: str = "cxcywh"
   return_features: bool = True
   return_objectness: bool = True
-
+  
   def collate(self, batch: List[GPVExample]) -> Tuple[Dict[str, Any], List]:
     boxes = []
     features = []
@@ -633,8 +633,8 @@ class Hdf5FeatureExtractor(ImageFeatureExtractor):
       return Hdf5FeatureExtractorCollate(
         image_utils.get_hdf5_image_file(self.source), self._box_format)
     else:
-      files = [image_utils.get_hdf5_image_file(self.source) for x in self.source]
-      return MultiHdf5FeatureExtractorCollate(files, self._box_format)
+      files = [image_utils.get_hdf5_image_file(x) for x in self.source]
+      return MultiHdf5FeatureExtractorCollate(files, self.box_format)
 
   def forward(self, features) -> ImageRegionFeatures:
     if self.box_embedder:

@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from exp.ours import file_paths
 from exp.ours.data.gpv_data import Task, GPVExample
-from exp.ours.experiments.cli_utils import add_dataset_args, get_datasets_from_args
+from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.image_featurizer.detr_featurizer import PretrainedDetrFeaturizer
 from exp.ours.image_featurizer.image_featurizer import ImageRegionFeatures, numpy_xywh_to_cxcywh
 from exp.ours.image_featurizer.vinvl_featurizer import VinvlImageFeaturizer, \

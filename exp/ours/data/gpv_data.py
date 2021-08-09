@@ -14,6 +14,7 @@ class Task(FromParams, enum.Enum):
   DETECTION = "det"
   CAPTIONING = "cap"
   CLS_IN_CONTEXT = "cic"
+  WEBQA = "webqa"
 
   @classmethod
   def from_params(
@@ -49,6 +50,8 @@ class Task(FromParams, enum.Enum):
 
 
 GPV1_TASKS = [Task.CLS, Task.VQA, Task.CAPTIONING, Task.DETECTION]
+
+GPV2_TASKS = [Task.CLS_IN_CONTEXT, Task.CLS, Task.VQA, Task.CAPTIONING, Task.DETECTION]
 
 
 @dataclass(frozen=True)
@@ -87,3 +90,6 @@ class GPVExample:
   sort_len: Optional[int] = None
 
   meta: Any = None
+
+  def get_gpv_id(self):
+    return self.id

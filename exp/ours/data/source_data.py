@@ -34,9 +34,13 @@ def load_instances(kind, split, gpv_split=True) -> List[Dict]:
     ds = "coco_detection"
   elif kind in {"cap", "captioning", "coco_captions"}:
     ds = "coco_captions"
+  elif kind in {"web_80"}:
+    ds = "web_80"
   else:
     raise NotImplementedError(kind)
-  if gpv_split:
+  if ds == "web_80":
+    split_txt = ""
+  elif gpv_split:
     split_txt = "gpv_split"
   else:
     split_txt = "original_split"
@@ -91,6 +95,28 @@ class ClassWebClsExample:
   image_id: str
   category_int: int
   category: str
+  meta: Optional[Dict[str, Any]] = None
+
+  @property
+  def crop(self):
+    return None
+
+  @property
+  def query_box(self):
+    return None
+
+  def get_gpv_id(self):
+    return f"web-{self.image_id}"
+
+
+@dataclass(frozen=True)
+class WebQaExample:
+  id: Union[id, str]
+  image_id: str
+  question: str
+  category_int: int
+  answer: str
+  question_type: str
   meta: Optional[Dict[str, Any]] = None
 
   @property
@@ -332,11 +358,29 @@ def _load_gpv_cls(split, gpv_split, identification=False) -> List:
   return out
 
 
+def load_webqa(split) -> List[WebQaExample]:
+  """Load WebQA data"""
+  fn = WebQaExample
+  raw_instances = load_instances("webqa", split)
+  out = []
+  for x in raw_instances:
+    meta = {"gpv1-query": x["query"], "bing-query": x["bing_query"],
+            "gpv1-seen": x["coco_categories"]["seen"],
+            "gpv1-unseen": x["coco_categories"]["unseen"],
+            "rank": x["image"]["rank"]}
+    q = fn(
+      x["id"], x["image"]["image_id"], x["category_id"],
+      x["answer"], x["question_type"], meta=meta)
+    out.append(q)
+  return out
+
+
 GPV_KINDS = {
   'vqa': load_gpv_vqa,
   'cls': load_gpv_cls,
   'cap': load_gpv_captioning,
-  'det': load_gpv_boxes
+  'det': load_gpv_boxes,
+  'webqa': load_webqa,
 }
 
 
