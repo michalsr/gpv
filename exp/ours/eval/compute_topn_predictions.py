@@ -6,7 +6,7 @@ import os
 
 import h5py
 
-from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc
+from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc, CocoCategories
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -39,6 +39,7 @@ class EvaluationConfig(Registrable):
 DEFAULT_MAX_SEQ_LEN = {
   Task.VQA: 10,
   Task.CLS: 5,
+  Task.CLS_IN_CONTEXT: 5,
   Task.CAPTIONING: 30
 }
 
@@ -100,17 +101,14 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
 
   bs = BeamSearchSpec(
     beam_size=args.beam_size, max_seq_len=max_seq_len)
-  prediction_args = dict(allennlp_spec=bs)
+  prediction_args = dict(beam_search_spec=bs)
 
   if args.boost_unseen:
-    prediction_args["mask"] = SceUnseenCategories(args.boost_unseen, args.boost_syn)
+    prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
 
-  if args.cls_mask and task != Task.CLS:
+  if not args.no_cls_mask and task in {Task.CLS, Task.CLS_IN_CONTEXT}:
     logging.info("Using classification mask")
-    if "mask" in prediction_args:
-      raise ValueError()
-    # -1000 weight on words not in coco categories
-    prediction_args["mask"] = CocoCategoryVoc(-1000, inverse=True)
+    prediction_args["answer_options"] = CocoCategories()
 
   if task == Task.DETECTION:
     prediction_args["predict_text"] = False
@@ -164,7 +162,7 @@ def main():
   add_dataset_args(parser, task_default=("train",))
   parser.add_argument("--boost_unseen", type=float, default=None)
   parser.add_argument("--boost_syn", action="store_true")
-  parser.add_argument("--cls_mask", action="store_true")
+  parser.add_argument("--no_cls_mask", action="store_true")
   parser.add_argument("--device", nargs="+", default=[None])
   parser.add_argument("--batch_size", type=int, default=30)
   parser.add_argument("--num_workers", type=int, default=4)

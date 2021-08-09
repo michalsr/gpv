@@ -76,7 +76,7 @@ class EvaluationSetup(FromParams):
     return super().from_params(params, constructor_to_call, constructor_to_inspect)
 
   evaluator: Evaluator
-  prediction_args: Dict[str, Union[PredictionArg, int, float, str]]
+  prediction_args: Dict[str, Union[PredictionArg, int, float, str, None]]
 
 
 @dataclass
@@ -639,7 +639,6 @@ class Trainer(FromParams):
 
   def _load_and_log_train(self):
     """Load the training and log dataset sizes"""
-
     training_examples = [x.dataset.load() for x in self.train_datasets]
     total = sum(len(x) for x in training_examples)
 
@@ -650,7 +649,6 @@ class Trainer(FromParams):
 
   def _load_and_log_eval(self, training_examples):
     """Load eval data and log the dataset sizes"""
-
     eval_examples = [x.dataset.load() for x in self.eval_datasets]
 
     total_eval = 0
@@ -664,7 +662,9 @@ class Trainer(FromParams):
 
     logging.info(f"Have {total_eval} eval examples")
     for (examples, ds) in all_eval:
-      if ds.eval_sample:
+      if ds.eval_sample == 0:
+        pass
+      elif ds.eval_sample is not None:
         logging.info(f"\t{ds.eval_sample} samples of {len(examples)} from {ds.get_name()}")
       else:
         logging.info(f"\t{len(examples)} from {ds.get_name()}")
@@ -952,35 +952,16 @@ class Trainer(FromParams):
         if step_scheduler is not None:
           step_scheduler.step()
 
-
         if is_distributed() and self.sync_monitor:
           # Gather `monitor` from each work to primary so we can log the global average
-
-          if self.sync_monitor == "reduce" or isinstance(self.sync_monitor, list):
-            # Use dist.reduce, faster but either requires workers to agree on what
-            # keys are in `monitor`, or to the keys to be passed explicity in `sync_monitor`
-            if isinstance(self.sync_monitor, list):
-              assert all(k in set(self.sync_monitor) for k in monitor)
-              keys = self.sync_monitor
-              vals = [monitor.get(k, 0) for k in self.sync_monitor]
-            elif len(monitor) == 0:
-              keys, vals = [], []
-            else:
-              keys, vals = py_utils.transpose_lists((k, monitor[k]) for k in sorted(monitor))
-            monitor_tensors = torch.as_tensor(vals, device=device)
-            dist.reduce(monitor_tensors, 0)
-            if is_primary():
-              monitor_tensors = monitor_tensors / world_size
-              loss = monitor_tensors[-1].item()
-              monitor = {k: v.item() for k, v in zip(keys, monitor_tensors[:-1])}
-          else:
-            # Use gather object, which can accommodate works having different keys in monitor
-            out = [None] * world_size
-            dist.all_gather_object(out, (loss, monitor))
-            if is_primary():
-              loss = np.mean([x[0] for x in out])
-              monitor = py_utils.transpose_list_of_dicts([x[1] for x in out])
-              monitor = {k: np.mean(v) for k, v in monitor.items()}
+          # We use `all_gather_object` so things work even if monitor had different
+          # keys on different processes
+          out = [None] * world_size
+          dist.all_gather_object(out, (loss, monitor))
+          if is_primary():
+            loss = np.mean([x[0] for x in out])
+            monitor = py_utils.transpose_list_of_dicts([x[1] for x in out])
+            monitor = {k: np.mean(v) for k, v in monitor.items()}
 
         if is_primary():
           for k, v in monitor.items():

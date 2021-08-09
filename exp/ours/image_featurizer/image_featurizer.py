@@ -1,4 +1,5 @@
 import logging
+from contextlib import ExitStack
 from os.path import join
 from typing import List, Dict, Any, Tuple, Optional, NewType
 
@@ -13,7 +14,7 @@ from allennlp.common import Registrable
 from dataclasses import dataclass, replace
 from torch import nn
 from torchvision.transforms.functional import hflip
-
+from torch.nn import functional as F
 from exp.ours import file_paths
 from exp.ours.data.gpv_data import Task, GPVExample
 from exp.ours.models.gpv1_preprocessing import get_train_transforms, get_eval_transform
@@ -408,7 +409,8 @@ class DebugFeaturizer(ImageFeatureExtractor, ImageCollater):
     return self
 
   def collate(self, batch):
-    return dict(batch_size=torch.as_tensor(len(batch)))
+    targets = get_box_targets(batch, [(640, 480) for _ in batch])
+    return dict(batch_size=torch.as_tensor(len(batch))), targets
 
   def forward(self, batch_size) -> ImageRegionFeatures:
     device = batch_size.device
@@ -417,6 +419,121 @@ class DebugFeaturizer(ImageFeatureExtractor, ImageCollater):
       torch.empty(batch_size, self.n_boxes, self.dim, device=device).uniform_(-1.0, 1.0),
       torch.log(torch.empty(batch_size, self.n_boxes, self.dim, device=device).uniform_(1e-6, 1.0 - 1e-6))
     )
+
+
+def extract_query_boxes(
+    hdf5_group, image_id, query_boxes, box_format, size, extract_features=True):
+  # Convert the queries to the format expected in the hdf5 file
+  query_boxes = torch.tensor(query_boxes, dtype=torch.float32)
+  if torch.any(query_boxes > 1.0):  # If the boxes are not normalized, normalize them
+    if size is None:
+      size = image_utils.get_image_size(image_id)
+    query_boxes /= torch.as_tensor([size[0], size[1], size[0], size[1]])
+  query_boxes = torchvision.ops.box_convert(query_boxes, "xywh", box_format)
+  saved_boxes = hdf5_group["query_bboxes"][:]
+
+  matches = np.abs(np.expand_dims(query_boxes.numpy(), 1) - np.expand_dims(saved_boxes, 0)) < 1e-6
+  matches = np.all(matches, -1)
+  q_ixs = []
+  for i, box in enumerate(query_boxes):
+    match_ix = np.where(matches[i])[0]
+    if len(match_ix) != 1:
+      print(saved_boxes)
+      print(query_boxes)
+      raise ValueError(f"Unable to locate a required query box for image {image_id}")
+    q_ixs.append(match_ix[0])
+
+  # TODO could avoid loading the entire array
+  objectness = torch.as_tensor(hdf5_group["query_objectness"][:][q_ixs])
+  if extract_features:
+    return query_boxes, objectness, torch.as_tensor(hdf5_group["query_features"][:][q_ixs])
+  else:
+    return query_boxes, objectness
+  # We do some footwork here since hdf5 needs sorted arrays as input, but we want to output
+  # boxes that match the input order
+  # q_ixs = np.array(q_ixs)
+  # arg_sort = q_ixs.argsort()
+  # q_ixs_sorted = q_ixs[arg_sort]
+  # undo_sort = np.argsort(arg_sort)
+  #
+  # objectness = torch.as_tensor(hdf5_group["query_objectness"][q_ixs_sorted][undo_sort])
+  # if extract_features:
+  #   return query_boxes, objectness, torch.as_tensor(hdf5_group["query_features"][q_ixs_sorted][undo_sort])
+  # else:
+  #   return query_boxes, objectness
+
+
+@dataclass
+class MultiHdf5FeatureExtractorCollate(ImageCollater):
+  source_files: List[str]
+  box_format: str = None
+  output_box_format: str = "cxcywh"
+  return_features: bool = True
+  return_objectness: bool = True
+
+  def collate(self, batch: List[GPVExample]) -> Tuple[Dict[str, Any], List]:
+    boxes = []
+    features = []
+    objectness = []
+    image_sizes = []
+
+    # TODO Should we cache key->file mapping in memory
+
+    with ExitStack() as stack:
+      files = [stack.enter_context(h5py.File(name, "r")) for name in self.source_files]
+      for ex in batch:
+        key = image_utils.get_cropped_img_key(ex.image_id, ex.crop)
+        f = [file for file in files if key in file]
+        assert len(f) == 1
+        grp = f[0][key]
+
+        if ex.target_boxes is not None:
+          image_sizes.append(image_utils.get_image_size(ex.image_id)[::-1])
+        else:
+          image_sizes.append(None)
+
+        box_key = "bboxes" if 'bboxes' in grp else "boxes"
+        image_boxes = torch.as_tensor(grp[box_key][:])
+
+        if self.return_features:
+          features.append(torch.as_tensor(grp['features'][:]))
+        if self.return_objectness:
+          objectness.append(torch.as_tensor(grp['objectness'][:]))
+
+        if ex.query_boxes is not None:
+          # Load recorded query features/objectness
+          # TODO if client does not want objectness or features, could just skip this completely
+          out = extract_query_boxes(
+            grp, ex.image_id, ex.query_boxes, self.box_format,
+            image_sizes[-1], extract_features=self.return_features)
+          image_boxes = torch.cat([image_boxes, out[0]], 0)
+          if self.return_objectness:
+            objectness[-1] = torch.cat([objectness[-1], out[1]], 0)
+          if self.return_features:
+            features[-1] = torch.cat([features[-1], out[2]], 0)
+
+        image_boxes = torchvision.ops.box_convert(image_boxes, self.box_format, self.output_box_format)
+        boxes.append(image_boxes)
+
+    target = get_box_targets(batch, image_sizes)
+    n_boxes = [len(x) for x in boxes]
+    max_len = max(n_boxes)
+    if all(n_boxes[0] == x for x in n_boxes[1:]):
+      fe = ImageRegionFeatures(
+        torch.stack(boxes),
+        torch.stack(features) if self.return_features else None,
+        torch.stack(objectness) if self.return_objectness else None,
+      )
+    else:
+      n_boxes = torch.as_tensor(n_boxes, dtype=torch.long)
+      fe = ImageRegionFeatures(
+        our_utils.stack_and_pad(boxes, max_len),
+        our_utils.stack_and_pad(features, max_len) if self.return_features else None,
+        (our_utils.stack_and_pad(objectness, max_len, pad=-10000)
+         if self.return_objectness else None),
+        n_boxes,
+      )
+    return dict(features=fe), target
 
 
 @dataclass
@@ -444,41 +561,25 @@ class Hdf5FeatureExtractorCollate(ImageCollater):
         box_key = "bboxes" if 'bboxes' in grp else "boxes"
         image_boxes = torch.as_tensor(grp[box_key][:])
 
-        image_boxes = torchvision.ops.box_convert(image_boxes, self.box_format, self.output_box_format)
-
-        boxes.append(image_boxes)
-
         if self.return_features:
           features.append(torch.as_tensor(grp['features'][:]))
         if self.return_objectness:
           objectness.append(torch.as_tensor(grp['objectness'][:]))
 
         if ex.query_boxes is not None:
-          # Convert to save format as stored in the hdf5 file
-          query_boxes = torch.as_tensor(ex.query_boxes, dtype=torch.float32)
-          if torch.any(query_boxes > 1.0):  # If the boxes are not normalized, normalize them
-            size = image_sizes[-1]
-            if size is None:
-              size = image_utils.get_image_size(ex.image_id)
-            query_boxes /= torch.as_tensor([size[0], size[1], size[0], size[1]])
-          query_boxes = torchvision.ops.box_convert(query_boxes, "xywh", self.box_format)
-
-          # Find matches in the file
-          saved_boxes = grp["query_bboxes"][:]
-          matches = np.abs(np.expand_dims(query_boxes, 1) - np.expand_dims(saved_boxes, 0)) < 1e-6
-          matches = np.all(matches, -1)
-          q_ixs = []
-          for i, box in enumerate(query_boxes):
-            match_ix = np.where(matches[i])[0]
-            if len(match_ix) != 1:
-              raise ValueError()
-            q_ixs.append(match_ix[0])
-          saved_boxes = torch.as_tensor(saved_boxes[q_ixs])
-          saved_boxes = torchvision.ops.box_convert(saved_boxes, self.box_format, self.output_box_format)
-          boxes[-1] = torch.cat([boxes[-1], saved_boxes], 0)
+          # Load recorded query features/objectness
+          # TODO if client does not want objectness or features, could just skip this completely
+          out = extract_query_boxes(
+            grp, ex.image_id, ex.query_boxes, self.box_format,
+            image_sizes[-1], extract_features=self.return_features)
+          image_boxes = torch.cat([image_boxes, out[0]], 0)
+          if self.return_objectness:
+            objectness[-1] = torch.cat([objectness[-1], out[1]], 0)
           if self.return_features:
-            q_features = grp['query_features'][q_ixs]
-            features[-1] = torch.cat([features[-1], torch.as_tensor(q_features)], 0)
+            features[-1] = torch.cat([features[-1], out[2]], 0)
+
+        image_boxes = torchvision.ops.box_convert(image_boxes, self.box_format, self.output_box_format)
+        boxes.append(image_boxes)
 
     target = get_box_targets(batch, image_sizes)
     n_boxes = [len(x) for x in boxes]
@@ -512,16 +613,28 @@ class Hdf5FeatureExtractor(ImageFeatureExtractor):
     self.box_format = box_format
 
     # Look up some meta-data in the hdf5 file
-    src = image_utils.get_hdf5_image_file(self.source)
-    with h5py.File(src, "r") as f:
-      if self.box_format is None:
-        self._box_format = f["box_format"][()]
+    if self.box_format is None:
+      if isinstance(source, str):
+        src = image_utils.get_hdf5_image_file(self.source)
+        with h5py.File(src, "r") as f:
+            self._box_format = f["box_format"][()]
       else:
-        self._box_format = self.box_format
+        _box_formats = []
+        for src in self.source:
+          with h5py.File(image_utils.get_hdf5_image_file(src), "r") as f:
+            _box_formats.append(f["box_format"][()])
+        assert all(_box_formats[0] == x for x in _box_formats[1:])
+        self.box_format = _box_formats[0]
+    else:
+      self._box_format = self.box_format
 
   def get_collate(self, is_train=False) -> 'ImageCollater':
-    return Hdf5FeatureExtractorCollate(
-      image_utils.get_hdf5_image_file(self.source), self._box_format)
+    if isinstance(self.source, str):
+      return Hdf5FeatureExtractorCollate(
+        image_utils.get_hdf5_image_file(self.source), self._box_format)
+    else:
+      files = [image_utils.get_hdf5_image_file(self.source) for x in self.source]
+      return MultiHdf5FeatureExtractorCollate(files, self._box_format)
 
   def forward(self, features) -> ImageRegionFeatures:
     if self.box_embedder:
