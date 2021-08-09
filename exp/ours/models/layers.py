@@ -39,6 +39,7 @@ class Linear(nn.Linear, Layer):
       bias=self.bias is not None,
     )
 
+
 @Layer.register("relu")
 class Relu(nn.ReLU, Layer):
   pass

@@ -14,7 +14,7 @@ from tqdm import tqdm
 from exp.ours.util import our_utils, py_utils
 from exp.ours.data.dataset import Dataset
 from exp.ours.data.gpv_data import GPVExample
-from exp.ours.models.model import GPVModel, GPVExampleOutput
+from exp.ours.models.model import GPVModel, GPVExampleOutput, PredictionArg
 import numpy as np
 
 from exp.ours.util.load_model import load_model
@@ -84,10 +84,6 @@ def load_gpv_predictions(output_dir, load_boxes=False, target_ids=None):
     return {k: GPVExampleOutput(None, None, v["answer"], v["probs"]) for k, v in data.items()}
 
 
-class PredictionArg(Registrable):
-  pass
-
-
 def prediction_args_to_json(prediction_args):
   prediction_args_dict = {}
   for k, v in prediction_args.items():
@@ -126,6 +122,7 @@ def _run_worker(
     device = devices[rank]
     with py_utils.DisableLogging():
       model: GPVModel = load_model(model, device=device)
+    model.set_prediction_args(**prediction_args)
     dataset = QueueDataset(queue)
     loader = DataLoader(
       dataset, batch_size=batch_size, num_workers=num_workers,
@@ -134,7 +131,7 @@ def _run_worker(
     for examples, batch in loader:
       batch = our_utils.to_device(batch, device)
       with torch.no_grad():
-        output = model.predict(**batch, **prediction_args)
+        output = model.predict(**batch)
       out_q.put(build_per_example_output(examples, output, beams_to_keep))
 
 
@@ -210,6 +207,8 @@ def run_model(
   if model_device is None:
     model_device = our_utils.get_model_device(model)
 
+  model.set_prediction_args(**prediction_args)
+
   if desc is None:
     desc = "eval"
 
@@ -222,7 +221,7 @@ def run_model(
   for examples, batch in it:
     batch = our_utils.to_device(batch, model_device)
     with torch.no_grad():
-      output = model.predict(**batch, **prediction_args)
+      output = model.predict(**batch)
 
     out.update(build_per_example_output(examples, output, beams_to_keep))
 

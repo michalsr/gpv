@@ -1,7 +1,8 @@
 import argparse
 import logging
 from collections import defaultdict
-from os import mkdir
+from datetime import datetime
+from os import mkdir, listdir
 from os.path import join, exists
 from typing import Any, Union, Optional, Tuple, List
 
@@ -33,7 +34,16 @@ class WrapCollate:
   collater: Any
 
   def __call__(self, batch: 'List[ExtractionTarget]'):
-    return batch, self.collater.collate(batch)[0]
+    try:
+      features = self.collater.collate(batch)[0]
+    except Exception as e:
+      # Mulit-processing is sometimes flakey about show us the right error
+      # so print here just to ensure it is visible
+      print(f"Error collating examples {[x.image_id for x in batch]}")
+      print(e)
+      logging.error(f"Error collating examples {[x.image_id for x in batch]}")
+      raise e
+    return batch, features
 
 
 def _get_model(model_name):
@@ -43,9 +53,9 @@ def _get_model(model_name):
     model = VinvlImageFeaturizer("R50C4_4setsvg")
   elif model_name == "vinvl-R50C4_4setsvg-rboxes":
     model = VinvlBackboneImageFeaturizer(
-      "vinvl", "R50C4_4setsvg", None, "all", include_all_image_box=include_all_image_box)
+      "vinvl", "R50C4_4setsvg", None, "all")
   elif model_name == "vinvl-R50C4_4sets":
-    model = VinvlImageFeaturizer("R50C4_4sets", include_all_image_box=include_all_image_box)
+    model = VinvlImageFeaturizer("R50C4_4sets")
   elif model_name == "vinvl_precomputed":
     model = VinVLPrecomputedFeatures()
   elif model_name == "detr_coco_sce":
@@ -72,8 +82,6 @@ def _run(device, data, args):
       out.features = None
     batch, n = out.boxes.size()[:2]
     boxes = torchvision.ops.box_convert(out.boxes.view(-1, 4), "cxcywh", "xyxy")
-    assert boxes.min() >= 0, [ex.image_id for ex in examples]
-    assert boxes.max() <= 1.0, [ex.image_id for ex in examples]
     out.boxes = boxes.view(batch, n, 4)
     yield examples, out.numpy()
 
@@ -140,6 +148,7 @@ def main():
   parser.add_argument("--force_dist", action="store_true")
   parser.add_argument("--output_format", choices=["directory", "hdf5", "pkl", "none"], default="hdf5")
   args = parser.parse_args()
+  all_image_query = True
 
   py_utils.add_stdout_logger()
 
@@ -152,24 +161,40 @@ def main():
   logging.info("Setting up data loader")
 
   queries = defaultdict(set)
-  for ds in get_datasets_from_args(args, split="coco_sce"):
-    for ex in ds.load():
-      if ex.crop is not None:
-        assert ex.query_box is None
-        queries[(ex.image_id, tuple(ex.crop))].add(None)
-      elif ex.query_box is not None:
-        queries[(ex.image_id, None)].add(tuple(ex.query_box))
-      else:
-        queries[(ex.image_id, None)].add(None)
 
-  all_image_query = True
+  # for ds in get_datasets_from_args(args, split="coco_sce"):
+  #   for ex in ds.load():
+  #     if ex.crop is not None:
+  #       assert ex.query_box is None
+  #       queries[(ex.image_id, tuple(ex.crop))].add(None)
+  #     elif ex.query_box is not None:
+  #       queries[(ex.image_id, None)].add(tuple(ex.query_box))
+  #     else:
+  #       queries[(ex.image_id, None)].add(None)
+
+  with open(file_paths.INVALID_WEB_IMAGES_LIST) as f:
+    black_list = set(f.read().split())
+
+  for example in listdir(file_paths.WEB_DIR):
+    if example not in black_list:
+      queries[(example, None)].add(None)
+
+  # print("DEBUG")
+  # keys = [50518, 117601]
+  # keys = [(x, None) for x in keys]
+  # assert all(k in queries for k in keys)
+  # queries = {k: queries[k] for k in keys}
 
   targets = []
   for (image_id, crop), image_queries in queries.items():
     if all_image_query:
-      w, h = image_utils.get_image_size(image_id)
       # An all-image box might already exist as, so add it to the set
-      image_queries.add((0, 0, w, h))
+      if image_queries == {None}:
+        # Use a normalized representation so we don't have to look up the image size
+        image_queries.add((0, 0, 1.0, 1.0))
+      else:
+        w, h = image_utils.get_image_size(image_id)
+        image_queries.add((0, 0, w, h))
     image_queries = [x for x in image_queries if x is not None]
     if image_queries:
       image_queries = np.array(image_queries, dtype=np.float32)
@@ -177,7 +202,47 @@ def main():
       image_queries = None
     targets.append(ExtractionTarget(image_id, crop, image_queries))
 
-  logging.info(f"Running on {len(targets)} images")
+  if output_format == "hdf5" and exists(get_hdf5_image_file(args.name)):
+    logging.info("Checking for existing features...")
+    # Check to see what images we have already completed
+    filtered_targets = []
+    with h5py.File(get_hdf5_image_file(args.name), "r") as f:
+      keys = set(f.keys())
+      for target in tqdm(targets, ncols=100):
+        key = image_utils.get_cropped_img_key(target.image_id, target.crop)
+        if key in keys:
+          done = True
+          # To be safe, we also check all the required fields are there
+          # grp = f[key]
+          # base_fields = ["bboxes", "objectness"]
+          # if args.features:
+          #   base_fields.append("features")
+          # if any(x not in grp for x in base_fields):
+          #   done = False
+          # elif target.query_boxes is not None:
+          #   query_fields = ["query_bboxes", "query_objectness", "query_features"]
+          #   if any(x not in grp for x in query_fields):
+          #     done = False
+          # if not done:
+          #   # TODO maybe we should just delete the offending group?
+          #   raise ValueError("Incomplete image write")
+        else:
+          done = False
+
+        if not done:
+          filtered_targets.append(target)
+    n_complete = len(targets) - len(filtered_targets)
+    if len(filtered_targets) == 0:
+      logging.info("All target already found in file")
+      return
+    if len(filtered_targets) != len(targets):
+      logging.info(f"Found {n_complete}/{len(targets)} ({100*n_complete/len(targets):0.3f}%) "
+                   f"complete targets, will process {len(filtered_targets)} remaining")
+      targets = filtered_targets
+    else:
+      logging.info(f"Running on {len(targets)} images")
+  else:
+    logging.info(f"Running on {len(targets)} images")
 
   if output_format == "directory":
     out = join(file_paths.CACHE_DIR, args.name)
@@ -189,10 +254,13 @@ def main():
     f = get_hdf5_image_file(args.name)
     logging.info(f"Saving into {f}")
 
-    out = h5py.File(f, "w")
+    out = h5py.File(f, "a")
 
     # Note this just to make saving in differing formats possible
-    out.create_dataset("box_format", data="xyxy")
+    if "box_format" not in out:
+      out.create_dataset("box_format", data="xyxy")
+    else:
+      assert out["box_format"][()] == "xyxy"
 
   elif output_format == "pkl":
     f = join(file_paths.CACHE_DIR, f"{args.name}.pkl")
@@ -231,7 +299,7 @@ def main():
         e = None if region_features.n_boxes is None else region_features.n_boxes[ix]
       to_save = dict(
         bboxes=region_features.boxes[ix, :e],
-        objectness=region_features.objectness[ix, :e]
+        objectness=region_features.objectness[ix, :e],
       )
       if region_features.features is not None:
         to_save["features"] = region_features.features[ix, :e]
@@ -244,9 +312,10 @@ def main():
 
         # Sanity check the query boxes saved should match the input boxes
         expected_query_boxes = torchvision.ops.box_convert(torch.as_tensor(target.query_boxes), "xywh", "xyxy")
-        w, h = image_utils.get_image_size(target.image_id)
-        expected_query_boxes /= torch.as_tensor([w, h, w, h]).unsqueeze(0)
-        assert torch.abs(expected_query_boxes - to_save["query_bboxes"]).max() <= 1e-6
+        if not torch.all(expected_query_boxes <= 1.0):  # if target.query_boxes are not normalized
+          w, h = image_utils.get_image_size(target.image_id)
+          expected_query_boxes /= torch.as_tensor([w, h, w, h]).unsqueeze(0)
+        assert torch.abs(expected_query_boxes - to_save["query_bboxes"]).max() < 1e-6
 
       key = image_utils.get_cropped_img_key(target.image_id, target.crop)
       if output_format == "directory":

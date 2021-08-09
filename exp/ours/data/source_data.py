@@ -4,7 +4,7 @@ import logging
 import sys
 from collections import defaultdict, Counter
 from os.path import join, exists, dirname
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Union
 
 from dataclasses import dataclass
 
@@ -86,6 +86,26 @@ class CocoBBoxes:
 
 
 @dataclass(frozen=True)
+class ClassWebClsExample:
+  id: Union[id, str]
+  image_id: str
+  category_int: int
+  category: str
+  meta: Optional[Dict[str, Any]] = None
+
+  @property
+  def crop(self):
+    return None
+
+  @property
+  def query_box(self):
+    return None
+
+  def get_gpv_id(self):
+    return f"web-{self.image_id}"
+
+
+@dataclass(frozen=True)
 class CocoBoxClsExample:
   """Example for classifying a single bbox in an image"""
   id: int
@@ -141,7 +161,6 @@ class CocoCaption:
 
   id: int
   caption: str
-  categories: Optional[List[str]] = None
   meta: Optional[Dict[str, Any]] = None
 
   def get_gpv_id(self):
@@ -197,7 +216,6 @@ class VqaQuestion:
   question_type: str
   answer_type: str
   answers: Counter
-  categories: Optional[List[str]] = None
   meta: Optional[Dict[str, Any]] = None
 
   def to_json(self):
@@ -255,7 +273,7 @@ def load_gpv_vqa(split, gpv_split) -> List[VqaQuestion]:
     q = VqaQuestion(
       x["question_id"], x["image"]["image_id"], x["query"],
       x["anno"]["question_type"], x["anno"]["answer_type"],
-      Counter(x["all_answers"]), None if cats is None else cats["seen"] + cats["unseen"],
+      Counter(x["all_answers"]),
       meta=meta)
     out.append(q)
   return out
@@ -274,7 +292,7 @@ def load_gpv_captioning(split, gpv_split) -> List[CocoCaptions]:
       "gpv1-answer": x["answer"],
       "gpv1-query": x["query"]
     }
-    q = CocoCaption(x["cap_id"], x["answer"], cats["seen"] + cats["unseen"], meta)
+    q = CocoCaption(x["cap_id"], x["answer"], meta)
     grouped_by_image[x["image"]["image_id"]].append(q)
 
   out = []
