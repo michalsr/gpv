@@ -26,6 +26,7 @@ from tqdm import tqdm
 from torch import distributed as dist
 
 from exp.ours import file_paths
+from exp.ours.data.dataset_builder import DatasetBuilder
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset
 from exp.ours.data.gpv_data import Task
@@ -220,6 +221,7 @@ class Trainer(FromParams):
   # Data iterator parameters
   train_loader: DataLoaderBuilder = None
   eval_loader: DataLoaderBuilder = None
+  train_dataset_builder: DatasetBuilder=None
   sort_train: bool = False
 
   # Saving
@@ -401,6 +403,9 @@ class Trainer(FromParams):
       raise ValueError("Repeated IDs in train")
     # Ensure order is consistent between processes/training runs
     all_train.sort(key=lambda ex: ex.id)
+
+    if self.train_dataset_builder is not None:
+      all_train = self.train_dataset_builder.build(all_train)
 
     batch_size = self.train_loader.batch_size
 
