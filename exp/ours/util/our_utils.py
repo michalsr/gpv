@@ -321,7 +321,7 @@ class SubsetSampler(Sampler):
 class DistributedSubsetSampler(Sampler):
   def __init__(self, n: int, n_examples: Optional[int], rank: int,
                world_size: int, sort=False, seed=0):
-    if not isinstance(n, int) or not isinstance(n_examples, int):
+    if not isinstance(n, int):
       raise ValueError("args should be integers")
     if n_examples > n:
       raise ValueError()
@@ -331,7 +331,7 @@ class DistributedSubsetSampler(Sampler):
     self.world_size = world_size
     self.n_examples = n_examples
     self.seed = seed
-    self.bound = get_batch_bounds(n_examples, self.world_size)
+    self.bound = get_batch_bounds(n if n_examples is None else n_examples, self.world_size)
 
   def set_seed(self, seed):
     self.seed = seed
