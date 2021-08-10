@@ -470,6 +470,13 @@ class MultiHdf5FeatureExtractorCollate(ImageCollater):
   output_box_format: str = "cxcywh"
   return_features: bool = True
   return_objectness: bool = True
+
+  def __post_init__(self):
+    self.key_to_ix = {}
+    for ix, file in enumerate(self.source_files[:-1]):
+      with h5py.File(file, "r") as f:
+        for key in f.keys():
+          self.key_to_ix[key] = ix
   
   def collate(self, batch: List[GPVExample]) -> Tuple[Dict[str, Any], List]:
     boxes = []
@@ -477,15 +484,12 @@ class MultiHdf5FeatureExtractorCollate(ImageCollater):
     objectness = []
     image_sizes = []
 
-    # TODO Should we cache key->file mapping in memory
-
     with ExitStack() as stack:
       files = [stack.enter_context(h5py.File(name, "r")) for name in self.source_files]
       for ex in batch:
         key = image_utils.get_cropped_img_key(ex.image_id, ex.crop)
-        f = [file for file in files if key in file]
-        assert len(f) == 1
-        grp = f[0][key]
+        ix = self.key_to_ix.get(key, -1)
+        grp = files[ix][key]
 
         if ex.target_boxes is not None:
           image_sizes.append(image_utils.get_image_size(ex.image_id)[::-1])
