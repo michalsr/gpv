@@ -323,7 +323,7 @@ class DistributedSubsetSampler(Sampler):
                world_size: int, sort=False, seed=0):
     if not isinstance(n, int):
       raise ValueError("args should be integers")
-    if n_examples > n:
+    if n_examples is not None and n_examples > n:
       raise ValueError(f"Requested {n_examples} examples, but only have {n} total")
     self.n = n
     self.rank = rank
