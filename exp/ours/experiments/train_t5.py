@@ -85,17 +85,19 @@ def main():
   print("Optimizer:")
   print(json.dumps(to_params(optimizer, OptimizerBuilder), indent=2))
 
-  trainer = get_trainer_from_args(
+  trainer: Trainer = get_trainer_from_args(
     args, logging_ema=0.995, find_unused_parameters=True,
     optimizer=optimizer, scheduler=scheduler
   )
 
   # Add the WebQaDataset we want to experiment with
   trainer.train_datasets.append(TrainerDataset(
-    Web80QaDataset(100 if args.debug else None, "train"), "webqa-tr"
+    Web80QaDataset(100 if args.debug else None, "train"), "webqa-tr",
+    eval_sample=50 if args.debug else 3000
   ))
   trainer.eval_datasets.append(TrainerDataset(
-    Web80QaDataset(100 if args.debug else None, "val"), "webqa-val"
+    Web80QaDataset(100 if args.debug else None, "val"), "webqa-val",
+    eval_sample=50 if args.debug else 5000
   ))
   trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
   trainer.evaluation[Task.WEBQA] = EvaluationSetup(
