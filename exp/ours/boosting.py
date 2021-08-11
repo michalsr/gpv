@@ -27,8 +27,12 @@ class MaskSpec(PredictionArg):
 
 @PredictionArg.register("coco-categories")
 class CocoCategories(PredictionArg, list):
-  def __init__(self):
-    super().__init__(ID_TO_COCO_CATEGORY.values())
+  def __init__(self, synonyms=False):
+    self.synonyms = synonyms
+    if self.synonyms:
+      super().__init__(py_utils.flatten_list(SYNONYMS[x] for x in ID_TO_COCO_CATEGORY.values()))
+    else:
+      super().__init__(ID_TO_COCO_CATEGORY.values())
 
 
 @PredictionArg.register("webqa-list")
