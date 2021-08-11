@@ -143,6 +143,8 @@ class BasicGPVLoss(GPVLoss):
     loc = params["localization"]
     if "ident_w" not in params:
       params["ident_w"] = 1.0
+    if "webqa_w" not in params:
+      params["webqa_w"] = 1.0
     if "type" not in loc:
       loc["type"] = "detr-loss"
       for k in ["class_w", "bbox_w", "giou_w"]:
