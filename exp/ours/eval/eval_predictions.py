@@ -13,11 +13,11 @@ from typing import Dict
 from dataclasses import replace
 
 from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.gpv_data import Task, ALL_TASKS
 from exp.ours.data.source_data import CocoCaptions
 from exp.ours.experiments.cli_utils import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, DetectionEvaluator, \
-  ClsEvaluator, Evaluator, ResultKey
+  ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator
 from exp.ours.train.runner import GPVExampleOutput, load_gpv_predictions
 from exp.ours.util import py_utils, our_utils
 from exp.ours.util.to_params import to_params
@@ -109,7 +109,9 @@ def get_evaluator(dataset):
     Task.VQA: VqaEvaluator(),
     Task.CAPTIONING: CaptionEvaluator(per_caption=per_caption, bleu=None),
     Task.DETECTION: DetectionEvaluator(),
-    Task.CLS: ClsEvaluator()
+    Task.CLS: ClsEvaluator(),
+    Task.CLS_IN_CONTEXT: ClsEvaluator(),
+    Task.WEBQA: WebQaEvaluator()
   }[dataset.get_task()]
   return evaluator, get_subsets
 
@@ -245,19 +247,16 @@ def main():
         results["n-runs"] = n_runs
       grouped[key] = results
 
-    # Print results
     to_show = []
     for (model_name, eval_name), to_show_stats in grouped.items():
       model_stats = dict(model=model_name, eval=eval_name)
       model_stats.update(to_show_stats)
       to_show.append(model_stats)
 
-    # print(py_utils.list_of_dicts_as_table_str(to_show, val_format))
-
   sorted_all_table = {}
   for row_name, row in all_table.items():
     sorted_row = {}
-    for task in [Task.VQA, task.CAPTIONING, Task.DETECTION, Task.CLS]:
+    for task in ALL_TASKS:
       for subset in [None, "seen", "unseen"]:
         metric = {Task.VQA: "score", Task.DETECTION: "AP", Task.CLS: "accuracy", Task.CAPTIONING: "cider"}[task]
         k = task.value + "/" + str(ResultKey(metric, subset))
