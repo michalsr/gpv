@@ -116,6 +116,12 @@ def get_evaluator(dataset):
   return evaluator, get_subsets
 
 
+ALL_TABLE_TASK_METRICS = {
+  Task.VQA: "score", Task.DETECTION: "AP", Task.CAPTIONING: "cider",
+  Task.CLS: "accuracy", Task.CLS_IN_CONTEXT: "accuracy", Task.WEBQA: "accuracy",
+}
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("prediction_file")
@@ -258,7 +264,7 @@ def main():
     sorted_row = {}
     for task in ALL_TASKS:
       for subset in [None, "seen", "unseen"]:
-        metric = {Task.VQA: "score", Task.DETECTION: "AP", Task.CLS: "accuracy", Task.CAPTIONING: "cider"}[task]
+        metric = ALL_TABLE_TASK_METRICS[task][task]
         k = task.value + "/" + str(ResultKey(metric, subset))
         if k in row:
           sorted_row[k] = row[k]

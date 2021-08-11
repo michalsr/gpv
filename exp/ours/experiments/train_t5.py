@@ -97,7 +97,7 @@ def main():
   ))
   trainer.eval_datasets.append(TrainerDataset(
     Web80QaDataset(100 if args.debug else None, "val"), "webqa-val",
-    eval_sample=50 if args.debug else 5000
+    eval_sample=50 if args.debug else None
   ))
   trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
   trainer.evaluation[Task.WEBQA] = EvaluationSetup(

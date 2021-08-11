@@ -9,7 +9,7 @@ from utils.io import load_json_object
 
 
 def add_dataset_args(parser: ArgumentParser, sample=True,
-                     part_default=("test",), task_default=("all",)):
+                     part_default=("test",), task_default=("gpv2",)):
   parser.add_argument("--part", default=part_default,
                       choices=["val", "test", "all", "train"], nargs="+")
   parser.add_argument("--datasets", default=task_default,
@@ -26,9 +26,13 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
     train_tasks = set()
     for ds in trainer["train_datasets"]:
       ds = ds["dataset"]
-      assert ds["type"] == "gpv"
-      train_split.add(ds["gpv_split"])
-      train_tasks.add(Task(ds["task"]))
+      if ds["type"] == "gpv":
+        train_split.add(ds["gpv_split"])
+        train_tasks.add(Task(ds["task"]))
+      elif ds["type"] == "webqa":
+        train_tasks.add(Task.WEBQA)
+      else:
+        raise NotImplementedError(f"Dataset of type {ds['type']}")
 
     if len(train_split) != 1:
       raise ValueError()
