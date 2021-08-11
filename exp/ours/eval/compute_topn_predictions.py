@@ -36,9 +36,12 @@ class EvaluationConfig(Registrable):
   seen_concept_sub: float
 
 
+# These make sense for T5 based on the train data, maybe not for other models
 DEFAULT_MAX_SEQ_LEN = {
-  Task.VQA: 10,
-  Task.CLS: 5,
+  Task.VQA: 20,
+  Task.CLS: 6,
+  Task.CLS_IN_CONTEXT: 6,
+  Task.WEBQA: 8,
   Task.CAPTIONING: 30
 }
 
