@@ -49,9 +49,11 @@ class Task(FromParams, enum.Enum):
     return self
 
 
-GPV1_TASKS = [Task.CLS, Task.VQA, Task.CAPTIONING, Task.DETECTION]
+GPV1_TASKS = [Task.VQA, Task.CAPTIONING, Task.DETECTION, Task.CLS]
 
-GPV2_TASKS = [Task.CLS_IN_CONTEXT, Task.CLS, Task.VQA, Task.CAPTIONING, Task.DETECTION]
+GPV2_TASKS = GPV1_TASKS + [Task.CLS_IN_CONTEXT]
+
+ALL_TASKS = GPV2_TASKS + [Task.WEBQA]
 
 
 @dataclass(frozen=True)
