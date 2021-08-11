@@ -6,7 +6,7 @@ import os
 
 import h5py
 
-from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc, CocoCategories
+from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc, CocoCategories, WebQa80Answers
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -107,15 +107,19 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
     prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
 
   if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
-    if task == Task.WEBQA:
-      raise NotImplementedError()
     logging.info("Using classification mask")
-    if args.cls_mask == "categories":
-      prediction_args["answer_options"] = CocoCategories()
-    elif args.cls_mask == "synonyms":
-      prediction_args["answer_options"] = CocoCategories(synonyms=True)
+    if task == Task.WEBQA:
+      if args.cls_mask == "categories":
+        prediction_args["answer_options"] = WebQa80Answers()
+      elif args.cls_mask == "synonyms":
+        raise NotImplementedError()
     else:
-      raise ValueError(args.cls_mask)
+      if args.cls_mask == "categories":
+        prediction_args["answer_options"] = CocoCategories()
+      elif args.cls_mask == "synonyms":
+        prediction_args["answer_options"] = CocoCategories(synonyms=True)
+      else:
+        raise ValueError(args.cls_mask)
 
   if args.dry_run:
     logging.info("Skipping running the model since this is a dry run")

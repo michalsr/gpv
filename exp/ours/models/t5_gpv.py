@@ -195,6 +195,10 @@ class T5GPV(GPVModel):
       self.model.get_output_embeddings().weight.requires_grad = False
 
   def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+    if "mask" in state_dict:
+      # In case it was built during `set_prediction_args` and accidentally saved
+      del state_dict["mask"]
+
     if self.model is None:
       config = AutoConfig.from_pretrained(self.t5_model_name)
       self.model = OurT5ForConditionalGeneration(config)
@@ -360,9 +364,9 @@ class T5GPV(GPVModel):
           tensor_mask[encode_with_cache(word, self.tokenizer, self.tokenizer_cache)] = False
       tensor_mask[self.tokenizer.eos_token_id] = mask.target_eos()
       tensor_mask = torch.as_tensor(tensor_mask, device=device)
-      self.register_buffer("mask", tensor_mask.float() * mask.val)
+      self.register_buffer("mask", tensor_mask.float() * mask.val, persistent=False)
     else:
-      self.register_buffer("mask", None)
+      self.register_buffer("mask", None, persistent=False)
 
     if answer_options is not None:
       eos = self.tokenizer.eos_token_id
