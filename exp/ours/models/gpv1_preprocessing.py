@@ -11,7 +11,7 @@ NORMALIZE_TRANSFORM = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
 
 def get_stocastic_transforms(task: Task, cls_horizontal_flip=True):
-  if task == task.CLS or task == Task.CLS_IN_CONTEXT:
+  if task in {task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA}:
     transforms = [
       T.RandomApply([
         T.ColorJitter(0.4, 0.4, 0.4, 0.1)
