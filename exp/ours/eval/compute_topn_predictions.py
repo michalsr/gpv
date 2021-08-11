@@ -6,7 +6,7 @@ import os
 
 import h5py
 
-from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc
+from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc, CocoCategories
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -18,7 +18,7 @@ from shutil import rmtree
 from allennlp.common import Registrable
 from dataclasses import dataclass
 
-from exp.ours.experiments.cli_utils import add_dataset_args, get_datasets_from_args
+from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset
@@ -89,10 +89,6 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
   logging.info("Setting up...")
   examples = dataset.load()
 
-  # with h5py.File(image_utils.get_hdf5_image_file("dbg")) as f:
-  #   examples = [x for x in examples if image_utils.get_cropped_img_key(x.image_id, x.crop) in ]
-  # examples =[x for x in examples if x.get_gpv_id() == "vqa23735012"]
-
   if args.max_seq_len:
     max_seq_len = args.max_seq_len
   elif task == Task.DETECTION:
@@ -101,24 +97,25 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
     max_seq_len = DEFAULT_MAX_SEQ_LEN[task]
     logging.info(f"Defaulting to max_seq_len {max_seq_len} for task {task}")
 
-  bs = BeamSearchSpec(
-    beam_size=args.beam_size, max_seq_len=max_seq_len)
-  prediction_args = dict(allennlp_spec=bs)
+  if max_seq_len is not None:
+    bs = BeamSearchSpec(beam_size=args.beam_size, max_seq_len=max_seq_len)
+  else:
+    bs = None
+  prediction_args = dict(beam_search_spec=bs)
 
   if args.boost_unseen:
-    prediction_args["mask"] = SceUnseenCategories(args.boost_unseen, args.boost_syn)
+    prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
 
-  if args.cls_mask and task != Task.CLS:
+  if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
+    if task == Task.WEBQA:
+      raise NotImplementedError()
     logging.info("Using classification mask")
-    if "mask" in prediction_args:
-      raise ValueError()
-    # -1000 weight on words not in coco categories
-    prediction_args["mask"] = CocoCategoryVoc(-1000, inverse=True)
-
-  if task == Task.DETECTION:
-    prediction_args["predict_text"] = False
-    if args.nms:
-      prediction_args["nms"] = args.nms
+    if args.cls_mask == "categories":
+      prediction_args["answer_options"] = CocoCategories()
+    elif args.cls_mask == "synonyms":
+      prediction_args["answer_options"] = CocoCategories(synonyms=True)
+    else:
+      raise ValueError(args.cls_mask)
 
   if args.dry_run:
     logging.info("Skipping running the model since this is a dry run")
@@ -167,7 +164,7 @@ def main():
   add_dataset_args(parser, task_default=("train",))
   parser.add_argument("--boost_unseen", type=float, default=None)
   parser.add_argument("--boost_syn", action="store_true")
-  parser.add_argument("--cls_mask", action="store_true")
+  parser.add_argument("--cls_mask", default="none", choices=["none", "categories", "synonyms"])
   parser.add_argument("--device", nargs="+", default=[None])
   parser.add_argument("--batch_size", type=int, default=30)
   parser.add_argument("--num_workers", type=int, default=4)

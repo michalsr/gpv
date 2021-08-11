@@ -56,7 +56,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
 
   sample = None if not sample else getattr(args, "sample", None)
   to_show = []
-  for task in sorted(gpv_tasks):
+  for task in gpv_tasks:
     for part in parts:
       to_show += [GpvDataset(task, part, split, sample=sample)]
   return to_show

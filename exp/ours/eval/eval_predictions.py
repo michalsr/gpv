@@ -15,7 +15,7 @@ from dataclasses import replace
 from exp.ours.data.dataset import GpvDataset
 from exp.ours.data.gpv_data import Task, ALL_TASKS
 from exp.ours.data.source_data import CocoCaptions
-from exp.ours.experiments.cli_utils import add_dataset_args, get_datasets_from_args
+from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, DetectionEvaluator, \
   ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator
 from exp.ours.train.runner import GPVExampleOutput, load_gpv_predictions
