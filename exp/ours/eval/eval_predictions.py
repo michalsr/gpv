@@ -246,7 +246,7 @@ def main():
       n_runs = len(results)
       results = py_utils.transpose_list_of_dicts(results)
       results = {
-        str(k): np.mean(v)*(1 if k.metric_name == "n" else factor) for k, v
+        str(replace(k, dataset_name=None)): np.mean(v)*(1 if k.metric_name == "n" else factor) for k, v
         in results.items() if (args.show_n or k.metric_name != "n")}
       all_table["/".join(key)].update({task.value + "/" + str(k): val_format % v for k, v in results.items()})
       if n_runs > 1:
