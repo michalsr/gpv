@@ -91,7 +91,7 @@ class VinVLPrecomputedFeaturesCollate(ImageCollater):
     image_sizes = []
     conf = []
 
-    if any(x.crop is not None for x in batch) or any(x.query_box is not None for x in batch):
+    if any(x.crop is not None for x in batch) or any(x.query_boxes is not None for x in batch):
       raise NotImplementedError()
 
     preds = self.reader.get([x.image_id for x in batch])
