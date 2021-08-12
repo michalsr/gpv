@@ -77,6 +77,8 @@ class T5GPV(GPVModel):
       _fix_old_params(params)
     if "box_aux_loss" in params:
       assert params.pop("box_aux_loss") is None
+    if "nms" in params and params["nms"] == 0.0:
+      params["nms"] = None
     return super().from_params(params, **kwargs)
 
   def __init__(
@@ -93,10 +95,15 @@ class T5GPV(GPVModel):
       image_seperator=False,
       freeze_embed=False,
       initialize_joiner="coco",
-      nms: float=0.0,
+      nms: float=None,
       all_lower_case=False
   ):
     super().__init__()
+    if nms == 0.0:
+      # While this is technically possible, it doesn't really make sense to do nms with a 0.0
+      # threshold and some old code conflated nms=0.0 with nms=None so we disallow nms=0.0 here
+      # so we can treat 0.0 as None when loading this from a parameter file.
+      raise ValueError("Need nms > 0.0")
     if freeze_embed and image_seperator:
       raise NotImplementedError()
     self.all_lower_case = all_lower_case
@@ -338,8 +345,7 @@ class T5GPV(GPVModel):
     boxes = image_features.boxes
     n_boxes = image_features.n_boxes
 
-    loss, monitor = self.loss(t5_out.logits, labels, boxes,
-                              rel, n_boxes, box_targets, tasks)
+    loss, monitor = self.loss(t5_out.logits, labels, boxes, rel, n_boxes, box_targets, tasks)
     return loss, monitor
 
   def set_prediction_args(
