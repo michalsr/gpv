@@ -57,8 +57,8 @@ def get_image_featurizer(args) -> Tuple[ImageFeatureExtractor, int]:
   elif args.vmodel == "vinvl":
     if args.vfreeze != "all":
       raise ValueError()
-    dim = 2048
-    extractor = Hdf5FeatureExtractor("vinvl")
+    dim = 2048 + 5
+    extractor = Hdf5FeatureExtractor("vinvl", box_embedder=BasicBoxEmbedder())
   elif args.vmodel == "web-vinvl":
     if args.vfreeze != "all":
       raise ValueError()
