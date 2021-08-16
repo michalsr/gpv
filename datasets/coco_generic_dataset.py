@@ -13,11 +13,14 @@ from utils.detr_misc import collate_fn as detr_collate_fn
 
 
 class GenericCocoDataset(Dataset):
-    def __init__(self,cfg,subset):
+    def __init__(self, cfg, subset, samples=None):
         super().__init__()
         self.cfg = cfg
         self.subset = subset
-        self.samples = io.load_json_object(self.cfg.samples[self.subset])
+        if samples is None:
+            self.samples = io.load_json_object(self.cfg.samples[self.subset])
+        else:
+            self.samples = samples
         self.imh = self.cfg.image_size.H
         self.imw = self.cfg.image_size.W
         self.mean = torch.FloatTensor([0.485, 0.456, 0.406])
