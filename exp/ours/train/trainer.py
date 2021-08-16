@@ -889,6 +889,8 @@ class Trainer(FromParams):
     logging.info(f"Have {n_train} params and {n_freeze} frozen parameters")
 
     for epoch in range(train_state.epoch, self.epochs):
+      if hasattr(train_loader.dataset, "set_epoch"):
+        train_loader.dataset.set_epoch(epoch)
       ep_start = perf_counter()
       model.train()
 
