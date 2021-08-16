@@ -11,7 +11,7 @@ from collections import defaultdict
 from os import listdir, remove
 from os.path import exists, isdir, join
 from shutil import rmtree
-from typing import TypeVar, List, Iterable, Dict, Any, Tuple, Optional
+from typing import TypeVar, List, Iterable, Dict, Any, Tuple, Optional, Set
 import numpy as np
 from tqdm import tqdm
 
@@ -365,6 +365,18 @@ class ReplaceAll:
   def replace(self, target: str) -> str:
     # The first group matches the non-word prefix, which we keep, the second is the replacement string
     return self.pattern.sub(lambda match: match.group(1) + self.replacements[match.group(2)], target)
+
+
+class FindAll:
+
+  def __init__(self, replacements: Dict[str, str]):
+    rep_sorted = sorted(replacements, key=len, reverse=True)  # Match longest first
+    self.replacements = replacements
+    self.pattern = re.compile(r"(?:^|\W)(" + "|".join(regex.escape(x) for x in rep_sorted) + r")(?=\W|$)",
+                              flags=re.IGNORECASE)
+
+  def replace(self, target: str) -> Set[str]:
+    return set(self.replacements[x.lower()] for x in self.pattern.findall(target))
 
 
 # TODO can we avoid have set an extra attribute?

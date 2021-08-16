@@ -6,7 +6,7 @@ import torchvision.ops
 from allennlp.common import Params
 from transformers import AutoTokenizer, AutoConfig
 
-from exp.ours.data.gpv import ID_TO_COCO_CATEGORY
+from exp.ours.data.gpv import COCO_CATEGORIES
 from exp.ours.models.model import GPVModel, build_per_example_output
 from exp.ours.models.gpv1_preprocessing import Gpv1Preprocessor
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures
@@ -165,7 +165,7 @@ class T5GPV(GPVModel):
 
     if self.initialize_joiner:
       if self.initialize_joiner == "coco":
-        words = ID_TO_COCO_CATEGORY.values()
+        words = COCO_CATEGORIES
       else:
         raise NotImplementedError()
       logging.info("Initializing joiner bias with mean embeddings")

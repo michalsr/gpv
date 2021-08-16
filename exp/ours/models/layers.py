@@ -1,20 +1,13 @@
 import torch
-import torchvision.ops
-import transformers.models.deberta.modeling_deberta
 from allennlp.common import Registrable, Params
-from omegaconf import OmegaConf
 from torch import nn
 from torch.nn import functional as F
-from transformers import AutoTokenizer
 from transformers.models.t5.modeling_t5 import T5LayerNorm
 
-from exp.gpv.models.backbone import build_backbone, Backbone
-from exp.gpv.models.position_encoding import build_position_encoding, PositionEmbeddingLearned, \
-  PositionEmbeddingSine
+from exp.gpv.models.backbone import Backbone
+from exp.gpv.models.position_encoding import PositionEmbeddingSine
 from exp.ours import file_paths
-from exp.ours.data.gpv import ID_TO_COCO_CATEGORY
-from exp.ours.util import our_utils, py_utils
-from exp.ours.util.our_utils import replace_params_with_buffers
+from exp.ours.util import py_utils
 from exp.ours.util.to_params import to_params
 from utils.detr_misc import NestedTensor
 

@@ -19,7 +19,6 @@ from exp.gpv.metrics import create_coco_vocab_mask
 from exp.gpv.models.gpv import GPV
 from exp.ours import file_paths
 from exp.ours.data.dataset import *
-from exp.ours.data.gpv import ID_TO_COCO_CATEGORY
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageCollater
 from exp.ours.train.runner import BeamSearchSpec
 from exp.ours.util import our_utils, py_utils
