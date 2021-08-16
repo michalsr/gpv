@@ -84,6 +84,7 @@ def get_trainer_from_args(
 
   best_model_key = [
     evaluator.ResultKey("accuracy", dataset_name="cls-val"),
+    evaluator.ResultKey("accuracy", dataset_name="cic-val"),
     evaluator.ResultKey("score", dataset_name="vqa-val"),
     evaluator.ResultKey("cider", dataset_name="cap-val"),
     evaluator.ResultKey("AP", dataset_name="det-val"),
