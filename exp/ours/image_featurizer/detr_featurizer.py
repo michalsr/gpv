@@ -4,7 +4,7 @@ import torch
 import torchvision.ops
 from dataclasses import dataclass
 
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import Task
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, \
   ImageRegionFeatures, ImageCollater, get_box_targets
 from exp.ours.models.gpv1_preprocessing import get_eval_transform, get_train_transforms

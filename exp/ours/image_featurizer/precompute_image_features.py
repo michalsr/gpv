@@ -15,7 +15,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from exp.ours import file_paths
-from exp.ours.data.gpv_data import Task, GPVExample
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import Task, ClsExample
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.image_featurizer.detr_featurizer import PretrainedDetrFeaturizer
 from exp.ours.image_featurizer.image_featurizer import ImageRegionFeatures, numpy_xywh_to_cxcywh
@@ -162,22 +163,25 @@ def main():
 
   queries = defaultdict(set)
 
-  # for ds in get_datasets_from_args(args, split="coco_sce"):
-  #   for ex in ds.load():
-  #     if ex.crop is not None:
-  #       assert ex.query_box is None
-  #       queries[(ex.image_id, tuple(ex.crop))].add(None)
-  #     elif ex.query_box is not None:
-  #       queries[(ex.image_id, None)].add(tuple(ex.query_box))
-  #     else:
-  #       queries[(ex.image_id, None)].add(None)
+  for ds in get_datasets_from_args(args, split="coco_sce"):
+    for ex in ds.load():
+      if isinstance(ex, ClsExample):
+        if ex.crop is not None:
+          assert ex.query_box is None
+          queries[(ex.image_id, tuple(ex.crop))].add(None)
+        elif ex.query_box is not None:
+          queries[(ex.image_id, None)].add(tuple(ex.query_box))
+        else:
+          queries[(ex.image_id, None)].add(None)
+      else:
+        queries[(ex.image_id, None)].add(None)
 
-  with open(file_paths.INVALID_WEB_IMAGES_LIST) as f:
-    black_list = set(f.read().split())
-
-  for example in listdir(file_paths.WEB_DIR):
-    if example not in black_list:
-      queries[(example, None)].add(None)
+  # with open(file_paths.INVALID_WEB_IMAGES_LIST) as f:
+  #   black_list = set(f.read().split())
+  #
+  # for example in listdir(file_paths.WEB_DIR):
+  #   if example not in black_list:
+  #     queries[(example, None)].add(None)
 
   # print("DEBUG")
   # keys = [50518, 117601]
@@ -189,7 +193,7 @@ def main():
   for (image_id, crop), image_queries in queries.items():
     if all_image_query:
       # An all-image box might already exist as, so add it to the set
-      if image_queries == {None}:
+      if image_queries == {None} or all(x is None or all(c <= 1.0 for c in x) for x in image_queries):
         # Use a normalized representation so we don't have to look up the image size
         image_queries.add((0, 0, 1.0, 1.0))
       else:
@@ -307,7 +311,8 @@ def main():
       if target.query_boxes is not None:
         n = region_features.n_boxes[ix]
         to_save["query_bboxes"] = region_features.boxes[ix, e:n]
-        to_save["query_features"] = region_features.features[ix, e:n]
+        if args.features:
+          to_save["query_features"] = region_features.features[ix, e:n]
         to_save["query_objectness"] = region_features.objectness[ix, e:n]
 
         # Sanity check the query boxes saved should match the input boxes

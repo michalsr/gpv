@@ -6,7 +6,8 @@ from collections import Callable, defaultdict
 from dataclasses import dataclass
 from transformers import PreTrainedTokenizer, T5Tokenizer
 
-from exp.ours.data.gpv_data import GPVExample, Task
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater
 from exp.ours.train.optimizer_builder import ParameterSet
 import numpy as np

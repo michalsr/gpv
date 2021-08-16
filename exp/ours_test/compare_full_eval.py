@@ -7,14 +7,13 @@ from torch.utils.data import DataLoader
 from datasets.coco_datasets import CocoVqa, CocoCaptioning, CocoClassification, CocoDetection
 from exp.gpv.metrics import vqa_accuracy, cap_metrics, cls_metrics, det_metrics
 from exp.ours.util import our_utils, py_utils
-from exp.ours.data.dataset import GpvDataset
+from exp.ours.data.dataset import GpvDataset, Task
 from exp.ours.models.gpv1 import GPV1
-from exp.ours.data.gpv_data import Task
 from exp.ours.models.model import GPVModel
 from exp.ours.train.runner import run_model, CollateWithBatch, GPVExampleOutput
 from exp.ours.data.source_data import load_instances, CocoCaptions
 from exp.ours.train.evaluator import VqaEvaluator, CaptionEvaluator, ClsEvaluator, \
-  DetectionEvaluator
+  LocalizationEvaluator
 
 from utils.detr_misc import collate_fn as detr_collate_fn
 
@@ -110,7 +109,7 @@ def our_eval(task: Task, model: GPVModel, sl):
     max_steps = 5
   elif task == Task.DETECTION:
     examples.sort(key=lambda x: x.meta["gpv1-id"])
-    evaluator = DetectionEvaluator()
+    evaluator = LocalizationEvaluator()
     max_steps = None
   else:
     raise NotImplementedError()

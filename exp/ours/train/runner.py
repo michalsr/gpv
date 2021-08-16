@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from exp.ours.util import our_utils, py_utils
 from exp.ours.data.dataset import Dataset
-from exp.ours.data.gpv_data import GPVExample
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.models.model import GPVModel, GPVExampleOutput, PredictionArg
 import numpy as np
 

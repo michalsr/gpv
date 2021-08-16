@@ -1,14 +1,13 @@
 from argparse import ArgumentParser
 
-from exp.ours.boosting import CocoCategories, WebQa80Answers
-from exp.ours.data.dataset import GpvDataset
+from exp.ours.data.dataset import GPV1_TASKS, GPV2_TASKS
+from exp.ours.data.gpv import GpvDataset, CocoCategories
 from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.util.our_utils import get_devices
 from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
 from exp.ours.train import evaluator
 from exp.ours.train.trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
 
-from exp.ours.data.gpv_data import Task, GPV1_TASKS, GPV2_TASKS
 from exp.ours.util.py_utils import MarkIfNotDefault
 
 
@@ -145,7 +144,7 @@ def get_trainer_from_args(
       dict(beam_search_spec=BeamSearchSpec(1, 30))
     ),
     Task.DETECTION: EvaluationSetup(
-      evaluator.DetectionEvaluator(),
+      evaluator.LocalizationEvaluator(),
       dict(beam_search_spec=None)
     ),
     Task.CLS: EvaluationSetup(

@@ -12,7 +12,7 @@ from exp.gpv.models.backbone import build_backbone, Backbone
 from exp.gpv.models.position_encoding import build_position_encoding, PositionEmbeddingLearned, \
   PositionEmbeddingSine
 from exp.ours import file_paths
-from exp.ours.data.source_data import ID_TO_COCO_CATEGORY
+from exp.ours.data.gpv import ID_TO_COCO_CATEGORY
 from exp.ours.util import our_utils, py_utils
 from exp.ours.util.our_utils import replace_params_with_buffers
 from exp.ours.util.to_params import to_params
@@ -66,42 +66,6 @@ class Sequence(nn.Sequential, Layer):
 
   def to_params(self):
     return dict(args=[to_params(x, Layer) for x in self])
-
-
-@Layer.register("embedding-simplex")
-class EmbeddingSimplex(Layer):
-  def __init__(self, n_in, n_embeddings, n_out, init="zero",
-               pos_init=1, neg_init=-1, lin_factor=1.0):
-    super().__init__()
-    self.n_in = n_in
-    self.n_embeddings = n_embeddings
-    self.n_out = n_out
-    self.init = init
-    self.pos_init = pos_init
-    self.neg_init = neg_init
-    self.lin_factor = lin_factor
-
-    self.embed_predictor = nn.Linear(self.n_in, self.n_embeddings)
-    self.embed_predictor.weight.data[:] = 0.0
-    self.embed_predictor.bias.data[:] = 0
-    self.to_add = nn.Linear(self.n_in, self.n_out)
-    self.to_add.bias.data[:] = 0
-    self.to_add.weight.data[:] = 0
-    if self.init == "t5-coco-categories":
-      tok = AutoTokenizer.from_pretrained("t5-base")
-      ids = set()
-      ids.add(tok.eos_token_id)
-      for word in ID_TO_COCO_CATEGORY.values():
-        ids.update(tok.encode(word))
-      self.embed_predictor.bias.data[:] = self.neg_init
-      self.embed_predictor.bias.data[list(ids)] = self.pos_init
-    elif self.init != "zero":
-      raise ValueError()
-
-  def forward(self, features, embeddings):
-    embed_score = F.softmax(self.embed_predictor(features), -1)
-    embed_features = torch.matmul(embed_score, embeddings.weight[:self.n_embeddings])
-    return embed_features + self.to_add(features) * self.lin_factor
 
 
 @Layer.register("linear-objectness")

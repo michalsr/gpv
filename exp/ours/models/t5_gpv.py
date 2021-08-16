@@ -6,7 +6,7 @@ import torchvision.ops
 from allennlp.common import Params
 from transformers import AutoTokenizer, AutoConfig
 
-from exp.ours.data.source_data import ID_TO_COCO_CATEGORY
+from exp.ours.data.gpv import ID_TO_COCO_CATEGORY
 from exp.ours.models.model import GPVModel, build_per_example_output
 from exp.ours.models.gpv1_preprocessing import Gpv1Preprocessor
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures
@@ -46,8 +46,8 @@ def _fix_old_params(params: Params):
       type="linear", in_features=2304, out_features=768)
   freeze = params.pop("freeze_detr")
   if freeze is True:
-    freeze = "all-but-relevance"
-  params["image_feature_extractor"] = {'type': 'detr', 'freeze': freeze}
+    logging.warning("Freeze set but is not longer supported")
+  params["image_feature_extractor"] = {'type': 'detr'}
 
 
 def _fix_old_state_dict(state_dict: Dict[str, torch.Tensor]):

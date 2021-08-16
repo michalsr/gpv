@@ -1,6 +1,7 @@
 from collections import defaultdict
 from numbers import Number
 
+import spacy
 import torch
 from allennlp.common import FromParams, Registrable
 from pycocoevalcap.bleu.bleu import Bleu
@@ -8,9 +9,11 @@ from pycocoevalcap.cider.cider import Cider
 
 import third_party.detection_metrics.lib.Evaluator as det_evaluator
 from data.coco.synonyms import SYNONYMS
-from exp.ours.data.gpv_data import GPVExample
+from exp.ours import file_paths
+from exp.ours.data.gpv_example import GPVExample
 
-from exp.ours.data.source_data import CocoCaptions, VqaQuestion, CocoBoxClsExample, CocoBBoxes
+from exp.ours.data.dataset import VqaExample, CaptioningExample, ClsExample, LocalizationExample
+from exp.ours.data.opensce import OPENSCE_SYNONYMS
 from exp.ours.util.image_utils import get_image_size
 from exp.ours.train.runner import GPVExampleOutput
 
@@ -22,6 +25,7 @@ from exp.ours.util import py_utils
 import numpy as np
 
 from exp.ours.train.quiet_ptbtokenizer import QuitePTBTokenizer
+from utils.io import load_json_object
 
 
 def vqa_score(answer, ground_truth_answer_counts):
@@ -76,7 +80,7 @@ class PerExampleEvaluator(Evaluator):
       mean=True,
       subset_mapping=None
   ) -> Dict[ResultKey, Number]:
-    examples_with_predictions = [x for x in examples if x.get_gpv_id() in predictions]
+    examples_with_predictions = [x for x in examples if x.gpv_id in predictions]
     if not allow_partial and (len(examples) != len(examples_with_predictions)):
       raise ValueError(f"Only {len(examples_with_predictions)}/{len(examples)} "
                        f"of examples have predictions")
@@ -112,11 +116,11 @@ class PerExampleEvaluator(Evaluator):
 @Evaluator.register("vqa-evaluator")
 class VqaEvaluator(PerExampleEvaluator):
 
-  def evaluate_examples(self, examples: List[VqaQuestion],
+  def evaluate_examples(self, examples: List[VqaExample],
                         predictions: Dict[str, GPVExampleOutput], add_scores=False):
     out = []
     for example in examples:
-      answer = predictions[example.get_gpv_id()].text[0]
+      answer = predictions[example.gpv_id].text[0]
       score = vqa_score(answer, example.answers)
       out.append(dict(score=score))
     return out
@@ -125,10 +129,10 @@ class VqaEvaluator(PerExampleEvaluator):
 @Evaluator.register("cls-evaluator")
 class ClsEvaluator(PerExampleEvaluator):
 
-  def evaluate_examples(self, examples: List[CocoBoxClsExample], predictions: Dict[str, GPVExampleOutput]):
+  def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput]):
     out = []
     for example in examples:
-      answer = predictions[example.get_gpv_id()].text[0].lower()
+      answer = predictions[example.gpv_id].text[0].lower()
       gt_answer = SYNONYMS[example.category]
       out.append(dict(accuracy=answer in gt_answer))
     return out
@@ -145,18 +149,85 @@ class WebQaEvaluator(PerExampleEvaluator):
     return out
 
 
+@Evaluator.register("opensce-cls")
+class OpenSceClsEvaluator(PerExampleEvaluator):
+
+  def __init__(self, top_k: Optional[List[int]]=(5,), use_synonyms=True):
+    self.top_k = top_k
+    self.use_synonyms = use_synonyms
+
+  def evaluate_examples(self, examples: List[ClsExample], predictions: Dict[str, GPVExampleOutput]):
+    out = []
+    for example in examples:
+      answers = [x.lower() for x in predictions[example.get_gpv_id()].text]
+
+      # TODO following OpenSCE, we should use this when making predictions
+      # instead of duing evaluations
+      if self.use_synonyms:
+        gt = OPENSCE_SYNONYMS.get(example.category, [example.category])
+      else:
+        gt = [example.category]
+      vals = {"accuracy": answers[0] in gt}
+      if self.top_k is not None:
+        for k in self.top_k:
+          assert len(answers) >= k
+          vals[f"top{k}-acc"] = any(a in gt for a in answers[:k])
+      out.append(vals)
+    return out
+
+
+@Evaluator.register("opensce-vqa")
+class OpenSceVqaEvaluator(PerExampleEvaluator):
+
+  nlp = spacy.load('en_core_web_sm')
+
+  @staticmethod
+  def get_tokens(txt: str):
+    lemmas = [t.lemma_ for t in OpenSceVqaEvaluator.nlp(txt)]
+    articles = ['a','an','the']
+    return [l for l in lemmas if l not in articles]
+
+  @staticmethod
+  def answer_match(cand_tokens: List[str], ref_tokens: List[str]) -> bool:
+    return ' '.join(cand_tokens) == ' '.join(ref_tokens)
+
+  @staticmethod
+  def compute_accuracy(
+      gt_answer: str,
+      pred_answers: List[str],
+      k: int) -> float:
+    gt_tokens = OpenSceVqaEvaluator.get_tokens(gt_answer)
+    return float(any(
+      [OpenSceVqaEvaluator.answer_match(gt_tokens, OpenSceVqaEvaluator.get_tokens(ans)) for ans in pred_answers[:k]]))
+
+  def __init__(self, top_k: Optional[List[int]]=(5,)):
+    self.top_k = top_k
+
+  def evaluate_examples(self, examples: List[VqaExample], predictions: Dict[str, GPVExampleOutput]):
+    out = []
+    for example in examples:
+      answers = [x.lower() for x in predictions[example.get_gpv_id()].text]
+      vals = dict(accuracy=OpenSceVqaEvaluator.compute_accuracy(example.answers, answers, 1))
+      if self.top_k:
+        for k in self.top_k:
+          vals[f"top{k}-acc"] = OpenSceVqaEvaluator.compute_accuracy(example.answers, answers, k)
+      out.append(vals)
+    return out
+
+
+@Evaluator.register("localization-evaluator")
 @Evaluator.register("detect-evaluator")
-class DetectionEvaluator(PerExampleEvaluator):
+class LocalizationEvaluator(PerExampleEvaluator):
 
   def __init__(self, iou_thresh=0.5):
     self.iou_thresh = iou_thresh
 
-  def evaluate_examples(self, examples: List[CocoBBoxes], predictions: Dict[str, GPVExampleOutput]):
+  def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput]):
     eval_engine = det_evaluator.Evaluator()
     out = []
 
     for i, ex in enumerate(examples):
-      pred = predictions[ex.get_gpv_id()]
+      pred = predictions[ex.gpv_id]
       scores = pred.relevance
       pred_boxes = pred.boxes.copy()
       gt_boxes = np.array(ex.bboxes)
@@ -165,15 +236,10 @@ class DetectionEvaluator(PerExampleEvaluator):
       pred_boxes[:, 0] = pred_boxes[:, 0] - 0.5 * pred_boxes[:, 2]
       pred_boxes[:, 1] = pred_boxes[:, 1] - 0.5 * pred_boxes[:, 3]
 
-      # convert to relative coordinates
-      W, H = get_image_size(ex.image_id)
-      gt_boxes[:, 0] = gt_boxes[:, 0] / W
-      gt_boxes[:, 1] = gt_boxes[:, 1] / H
-      gt_boxes[:, 2] = gt_boxes[:, 2] / W
-      gt_boxes[:, 3] = gt_boxes[:, 3] / H
-
       B = pred_boxes.shape[0]
       all_boxes = det_evaluator.BoundingBoxes()
+      W, H = get_image_size(ex.image_id)
+
       for b in range(B):
         x, y, w, h = pred_boxes[b]
         all_boxes.addBoundingBox(det_evaluator.BoundingBox(
@@ -189,9 +255,22 @@ class DetectionEvaluator(PerExampleEvaluator):
           classConfidence=scores[b],
           format=det_evaluator.BBFormat.XYWH))
 
+      normalized_gt = all(all(val <= 1.0 for val in b) for b in gt_boxes)
+      if not normalized_gt:
+        # convert to relative coordinates
+        # TODO its a bit of hack to check this by looking coordinates > 1.0
+        # but we need this check atm since OpenSCE stores relative scaling
+        # coco uses absolute
+        W, H = get_image_size(ex.image_id)
+        gt_boxes[:, 0] = gt_boxes[:, 0] / W
+        gt_boxes[:, 1] = gt_boxes[:, 1] / H
+        gt_boxes[:, 2] = gt_boxes[:, 2] / W
+        gt_boxes[:, 3] = gt_boxes[:, 3] / H
+
       B = gt_boxes.shape[0]
       for b in range(B):
         x, y, w, h = gt_boxes[b]
+
         all_boxes.addBoundingBox(det_evaluator.BoundingBox(
           imageName=ex.image_id,
           classId=ex.category,
@@ -256,14 +335,16 @@ class CachingPTBTokenizer:
     return [dict(x) for x in out]
 
 
-def get_per_caption_data(examples, predictions):
+def get_per_caption_data(examples: List[CaptioningExample], predictions):
+  # In per-caption evaluation the model makes one prediction for each ground truth
+  # caption, each of which it still evaluated against all the captions,
   caption_examples = []
   caption_predictions = {}
   for ex in examples:
-    pred = predictions[ex.get_gpv_id()]
+    pred = predictions[ex.gpv_id]
     for cap in ex.captions:
-      caption_examples.append(CocoCaptions(cap.id, ex.captions))
-      caption_predictions[caption_examples[-1].get_gpv_id()] = pred
+      caption_examples.append(CaptioningExample(cap.gpv_id, ex.image_id, ex.captions))
+      caption_predictions[cap.gpv_id] = pred
   return caption_examples, caption_predictions
 
 
@@ -326,7 +407,7 @@ class CaptionEvaluator(Evaluator):
       out.update({ResultKey(metric_name=k, subset_name=subset_name): v for k, v in results.items()})
     return out
 
-  def evaluate_examples(self, examples: List[CocoCaptions], predictions: Dict[str, GPVExampleOutput]):
+  def evaluate_examples(self, examples: List[CaptioningExample], predictions: Dict[str, GPVExampleOutput]):
     all_scores = self._get_scores(examples, predictions)
 
     per_examples_scores = [{} for _ in examples]
@@ -343,13 +424,13 @@ class CaptionEvaluator(Evaluator):
 
     return per_examples_scores
 
-  def _get_scores(self,  examples: List[CocoCaptions], predictions: Dict[str, GPVExampleOutput]):
+  def _get_scores(self,  examples: List[CaptioningExample], predictions: Dict[str, GPVExampleOutput]):
     res = {}
     gts = {}
     for ix, instance in enumerate(examples):
-      key = instance.get_gpv_id()
+      key = instance.gpv_id
       assert key not in res
-      res[key] = [predictions[instance.get_gpv_id()].text[0]]
+      res[key] = [predictions[instance.gpv_id].text[0]]
       gts[key] = [x.caption.lower() for x in instance.captions]
 
     res, gts = self.tokenizer.tokenize_captions(res, gts)

@@ -14,7 +14,8 @@ from attr import dataclass
 import torchvision.transforms as T
 
 from exp.ours import file_paths
-from exp.ours.data.gpv_data import GPVExample, Task
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater, get_box_targets, \
   ImageFeatureExtractor, ImageRegionFeatures, numpy_xyxy_to_cxcywh,extract_query_boxes
 from exp.ours.models.gpv1_preprocessing import get_stocastic_transforms
@@ -241,7 +242,9 @@ class VinvlCollate(ImageCollater):
       query_boxes = None
 
     images = to_image_list(image_tensors)
-    out = dict(images=images, targets=targets, objectness=objectness, query_boxes=query_boxes)
+    out = dict(images=images, query_boxes=query_boxes, targets=targets)
+    if objectness is not None:
+      out["objectness"] = objectness
     box_targets = get_box_targets(batch, [x[::-1] for x in image_sizes])
     return out, box_targets
 

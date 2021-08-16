@@ -1,9 +1,7 @@
-from allennlp.common import FromParams
 from dataclasses import replace
 
-from exp.ours.data.gpv_data import GPVExample, Task
-from exp.ours.data.source_data import CocoCaptions, CocoBBoxes, CocoBoxClsExample, VqaQuestion, \
-  CocoBoxIdentificationExample, ClassWebClsExample, WebQaExample
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import *
 import torchvision.transforms as T
 import numpy as np
 
@@ -122,12 +120,13 @@ class Gpv1Preprocessor(FromParams):
     else:
       all_image_box = None
 
-    if isinstance(example, CocoCaptions):
+    # TODO ideally normalize boxes here too
+    if isinstance(example, CaptioningExample):
       if is_train:
         out = []
         for cap in example.captions:
           out.append(GPVExample(
-            cap.get_gpv_id(),
+            cap.gpv_id,
             Task.CAPTIONING,
             example.image_id,
             self.caption_queries_tok,
@@ -138,7 +137,7 @@ class Gpv1Preprocessor(FromParams):
           ))
       else:
         out = [GPVExample(
-          example.get_gpv_id(),
+          example.gpv_id,
           Task.CAPTIONING,
           example.image_id,
           self.caption_queries_tok,
@@ -147,9 +146,9 @@ class Gpv1Preprocessor(FromParams):
           target_answer=[self.preprocess_text(x.caption) for x in example.captions],
           meta=example.meta if include_meta else None
         )]
-    elif isinstance(example, CocoBBoxes):
+    elif isinstance(example, LocalizationExample):
       out = [GPVExample(
-        example.get_gpv_id(),
+        example.gpv_id,
         Task.DETECTION,
         example.image_id,
         [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES],
@@ -158,10 +157,13 @@ class Gpv1Preprocessor(FromParams):
         target_answer=None,
         meta=example.meta if include_meta else None
       )]
-    elif isinstance(example, VqaQuestion):
-      answer = max(example.answers.items(), key=lambda x: (x[1], len(x[0])))[0]
+    elif isinstance(example, VqaExample):
+      if isinstance(example.answers, Counter):
+        answer = max(example.answers.items(), key=lambda x: (x[1], len(x[0])))[0]
+      else:
+        answer = example.answers
       out = [GPVExample(
-        example.get_gpv_id(),
+        example.gpv_id,
         Task.VQA,
         example.image_id,
         [self.preprocess_text(example.question)],
@@ -179,10 +181,10 @@ class Gpv1Preprocessor(FromParams):
         target_answer=self.preprocess_text(example.target_answer),
         meta=None if include_meta else example.meta
       )]
-    elif isinstance(example, (CocoBoxClsExample, CocoBoxIdentificationExample)):
+    elif isinstance(example, ClsExample):
       out = [GPVExample(
-        example.get_gpv_id(),
-        Task.CLS_IN_CONTEXT if isinstance(example, CocoBoxIdentificationExample) else Task.CLS,
+        example.gpv_id,
+        example.task,
         example.image_id,
         self.cls_queries_tok,
         None,

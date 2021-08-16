@@ -6,9 +6,8 @@ from dataclasses import dataclass
 
 from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task
-from exp.ours.data.source_data import ID_TO_COCO_CATEGORY
+from exp.ours.data.dataset import Task
+from exp.ours.data.gpv import GpvDataset, ID_TO_COCO_CATEGORY
 from exp.ours.train.runner import PredictionArg
 from exp.ours.util import py_utils
 
@@ -23,23 +22,6 @@ class MaskSpec(PredictionArg):
 
   def get_inverse(self):
     return False
-
-
-@PredictionArg.register("coco-categories")
-class CocoCategories(PredictionArg, list):
-  def __init__(self, synonyms=False):
-    self.synonyms = synonyms
-    if self.synonyms:
-      super().__init__(py_utils.flatten_list(SYNONYMS[x] for x in ID_TO_COCO_CATEGORY.values()))
-    else:
-      super().__init__(ID_TO_COCO_CATEGORY.values())
-
-
-@PredictionArg.register("webqa-list")
-class WebQa80Answers(PredictionArg, list):
-  def __init__(self):
-    with open(file_paths.WEBQA80_ANSWERS) as f:
-      super().__init__(json.load(f))
 
 
 @PredictionArg.register("coco-cat-voc")
@@ -62,6 +44,7 @@ class CocoCategoryVoc(MaskSpec):
 
   def get_inverse(self):
     return self.inverse
+
 
 @dataclass
 @PredictionArg.register("sce-seen-categories")

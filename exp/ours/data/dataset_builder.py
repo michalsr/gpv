@@ -3,7 +3,7 @@ from typing import List
 from allennlp.common import Registrable
 from torch.utils.data import Dataset as TorcDataset
 
-from exp.ours.data.gpv_data import GPVExample
+from exp.ours.data.gpv_example import GPVExample
 import numpy as np
 
 

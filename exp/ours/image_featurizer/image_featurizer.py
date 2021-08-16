@@ -16,7 +16,8 @@ from torch import nn
 from torchvision.transforms.functional import hflip
 from torch.nn import functional as F
 from exp.ours import file_paths
-from exp.ours.data.gpv_data import Task, GPVExample
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import Task
 from exp.ours.models.gpv1_preprocessing import get_train_transforms, get_eval_transform
 from exp.ours.models.layers import Layer
 from exp.ours.util import image_utils, py_utils, our_utils
@@ -473,11 +474,16 @@ class MultiHdf5FeatureExtractorCollate(ImageCollater):
 
   def __post_init__(self):
     self.key_to_ix = {}
+
     for ix, file in enumerate(self.source_files[:-1]):
+      logging.info(f"Building key/file map for {file}...")
+
       with h5py.File(file, "r") as f:
         for key in f.keys():
           self.key_to_ix[key] = ix
-  
+
+    logging.info("Done")
+
   def collate(self, batch: List[GPVExample]) -> Tuple[Dict[str, Any], List]:
     boxes = []
     features = []

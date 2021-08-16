@@ -1,7 +1,7 @@
 import torch
 
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task, GPVExample
+from exp.ours.data.dataset import GpvDataset, Task
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.image_featurizer.image_featurizer import ImageRegionFeatures, \
   PretrainedDetrRIOExtractor
 from exp.ours.util import our_utils, image_utils, py_utils
