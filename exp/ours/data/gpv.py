@@ -16,8 +16,9 @@ def get_coco_categories():
   return load_json_object(coco_file)
 
 
-ID_TO_COCO_CATEGORY = {x["id"]: x["name"] for x in get_coco_categories()}
-COCO_CATEGORY_TO_ID = {v: k for k, v in ID_TO_COCO_CATEGORY.items()}
+COCO_ID_TO_CATEGORY = {x["id"]: x["name"] for x in get_coco_categories()}
+COCO_CATEGORIES = list(COCO_ID_TO_CATEGORY.values())
+COCO_CATEGORIES_TO_ID = {k: i for i, k in enumerate(COCO_CATEGORIES)}
 
 
 def load_instances(kind, split, gpv_split=True) -> List[Dict]:
@@ -64,7 +65,7 @@ def load_gpv_boxes(split, gpv_split) -> List[LocalizationExample]:
     gpv_id = f"coco-boxes{image_id}-cat{cat_id}"
     bbox = LocalizationExample(
       gpv_id, x["image"]["image_id"], np.array(x["boxes"]),
-      ID_TO_COCO_CATEGORY[cat_id], meta)
+      COCO_ID_TO_CATEGORY[cat_id], meta)
     out.append(bbox)
   return out
 
@@ -125,12 +126,12 @@ def _load_gpv_cls(split, gpv_split, in_context=False) -> List:
       # prediction files
       return ClsExample(
         f"coco-ident{i}", Task.CLS_IN_CONTEXT, image_id,
-        ID_TO_COCO_CATEGORY[category_id], query_box=box, meta=meta)
+        COCO_ID_TO_CATEGORY[category_id], query_box=box, meta=meta)
   else:
     def fn(i, image_id, category_id, box, meta):
       return ClsExample(
         f"coco-box{i}", Task.CLS, image_id,
-        ID_TO_COCO_CATEGORY[category_id], crop=box, meta=meta)
+        COCO_ID_TO_CATEGORY[category_id], crop=box, meta=meta)
 
   raw_instances = load_instances("cls", split, gpv_split)
   out = []
@@ -139,7 +140,7 @@ def _load_gpv_cls(split, gpv_split, in_context=False) -> List:
     meta = {"gpv1-query": x["query"]}
     if cats is not None:
       meta.update({"gpv1-seen": cats["seen"], "gpv1-unseen": cats["unseen"]})
-    assert x["answer"] == ID_TO_COCO_CATEGORY[x["category_id"]]
+    assert x["answer"] == COCO_ID_TO_CATEGORY[x["category_id"]]
     q = fn(
       x["id"], x["image"]["image_id"], x["category_id"],
       x["boxes"], meta=meta)
@@ -196,9 +197,9 @@ class CocoCategories(PredictionArg, list):
   def __init__(self, synonyms=False):
     self.synonyms = synonyms
     if self.synonyms:
-      super().__init__(py_utils.flatten_list(SYNONYMS[x] for x in ID_TO_COCO_CATEGORY.values()))
+      super().__init__(py_utils.flatten_list(SYNONYMS[x] for x in COCO_CATEGORIES))
     else:
-      super().__init__(ID_TO_COCO_CATEGORY.values())
+      super().__init__(COCO_CATEGORIES)
 
 
 @Dataset.register("gpv")
@@ -225,7 +226,8 @@ class GpvDataset(Dataset):
   }
 
   def __init__(self, task: Task, split: str, gpv_split=True,
-               sample=None, seen_sample=None, unseen_sample=None):
+               sample=None, seen_sample=None, unseen_sample=None,
+               per_example_captions=False):
     if split not in {"test", "val", "train"}:
       raise ValueError(split)
     if sample is not None and (seen_sample is not None or unseen_sample is not None):
@@ -236,6 +238,7 @@ class GpvDataset(Dataset):
     self.gpv_split = gpv_split
     self.seen_sample = seen_sample
     self.unseen_sample = unseen_sample
+    self.per_example_captions = per_example_captions
 
   def get_name(self):
     kind = "gpvsce" if self.gpv_split else "gpv"
@@ -258,6 +261,13 @@ class GpvDataset(Dataset):
 
   def load(self):
     instances = self.KINDS[self.task](self.split, self.gpv_split)
+    if self.per_example_captions and self.task == Task.CAPTIONING:
+      per_ex = []
+      for instance in instances:
+        for cap in instance.captions:
+          per_ex.append(CaptioningExample(cap.gpv_id, instance.image_id, [cap], cap.meta))
+      instances = per_ex
+
     if self.seen_sample is not None or self.unseen_sample is not None:
       instances.sort(key=lambda x: x.gpv_id)
       np.random.RandomState(613423).shuffle(instances)

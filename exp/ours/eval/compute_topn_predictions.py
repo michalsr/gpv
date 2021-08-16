@@ -156,7 +156,7 @@ def main():
   add_dataset_args(parser, task_default=("train",))
   parser.add_argument("--boost_unseen", type=float, default=None)
   parser.add_argument("--boost_syn", action="store_true")
-  parser.add_argument("--cls_mask", default="none", choices=["none", "categories", "synonyms"])
+  parser.add_argument("--cls_mask", default="categories", choices=["none", "categories", "synonyms"])
   parser.add_argument("--device", nargs="+", default=[None])
   parser.add_argument("--batch_size", type=int, default=30)
   parser.add_argument("--num_workers", type=int, default=4)

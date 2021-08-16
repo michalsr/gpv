@@ -160,7 +160,6 @@ class OpenSceClsEvaluator(PerExampleEvaluator):
     out = []
     for example in examples:
       answers = [x.lower() for x in predictions[example.get_gpv_id()].text]
-
       # TODO following OpenSCE, we should use this when making predictions
       # instead of duing evaluations
       if self.use_synonyms:
