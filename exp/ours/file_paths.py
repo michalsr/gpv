@@ -27,6 +27,12 @@ PRETRAINED_DETR_MODELS = {
  "coco": join(GPV_DIR, "data/detr", "detr_coco.pth")
 }
 
+OPENSCE_HOME = join(DATA_DIR, "git/opensce")
+OPENSCE_SAMPLES = join(OPENSCE_HOME, "samples_w_prompts")
+OPENSCE_IMAGES = join(OPENSCE_HOME, "images")
+OPENSCE_SYN = join(OPENSCE_HOME, "opensce_synonyms.json")
+OPENSCE_CATS = join(OPENSCE_HOME, "opensce_categories.csv")
+
 SOURCE_DIR = join(GPV_DIR, "data/learning_phase_data")
 GPV1_VOC = join(SOURCE_DIR, "vocab/vocab.json")
 GPV1_VOC_EMBED = join(SOURCE_DIR, "vocab/vocab_embed.npy")

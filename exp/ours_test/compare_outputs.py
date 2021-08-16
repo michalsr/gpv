@@ -10,9 +10,9 @@ from datasets.coco_multitask_dataset import CocoDetection as CocoDetectionDatase
 
 from exp.gpv.models.gpv import GPV
 from exp.ours.util import our_utils, py_utils
-from exp.ours.data.dataset import GpvDataset
+from exp.ours.data.dataset import GpvDataset, Task
 from exp.ours.models.gpv1 import GPV1
-from exp.ours.data.gpv_data import Task, GPVExample
+from exp.ours.data.gpv_example import GPVExample
 import numpy as np
 
 from exp.ours.models.model import GPVOutput

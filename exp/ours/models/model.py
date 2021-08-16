@@ -8,7 +8,8 @@ from allennlp.nn.beam_search import StepFunctionType, StateType
 from dataclasses import dataclass
 from torch import nn
 
-from exp.ours.data.gpv_data import GPVExample, Task
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import Task
 
 
 @dataclass

@@ -16,11 +16,11 @@ from torchvision.ops import box_convert
 
 from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task, GPVExample, GPV1_TASKS
-from exp.ours.data.source_data import CocoCaptions, CocoBoxClsExample, ID_TO_COCO_CATEGORY, \
-  VqaQuestion, CocoBBoxes
-from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractor, ImageRegionFeatures
+from exp.ours.data.dataset import Task, CaptioningExample, ClsExample, LocalizationExample
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.opensce import OpenSceDataset
+from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractor, ImageRegionFeatures, \
+  MultiHdf5FeatureExtractorCollate
 from exp.ours.image_featurizer.vinvl_featurizer import VinVLPrecomputedFeatures
 from exp.ours.train.evaluator import CaptionEvaluator, vqa_score
 from exp.ours.train.runner import load_gpv_predictions, GPVExampleOutput
@@ -91,10 +91,11 @@ class BoxesToVisualize:
   normalized: bool = False
 
 
-class CocoVisualize:
+class HtmlVisualizer:
 
-    def __init__(self, image_root):
+    def __init__(self, image_root, opensce_root):
         self.image_root = image_root
+        self.opensce_root = opensce_root
         self._file_map = None
 
     def get_image_html_boxes(self, image_id, boxes: List[BoxesToVisualize],
@@ -116,7 +117,10 @@ class CocoVisualize:
         image_w, image_h = imagesize.get(cropped_full_path)
       else:
         # TODO This depends on the details of the filepath...
-        src = "images/" + image_file.split("images/")[-1]
+        if "/" in image_id:
+          src = self.opensce_root + "/" + image_id
+        else:
+          src = self.image_root + "/" + image_file.split("images/")[-1]
         image_w, image_h = image_utils.get_image_size(image_id)
 
       image_attr = dict(src=src)
@@ -276,7 +280,7 @@ table th {
       html += [f'<span style="font-size:20px;">{score:0.2f} {pred_html}</span>']
       return html
 
-    def get_multi_captioning_html(self, instance: CocoCaptions, names, captions, scores, unseen_concepts, boxes, rel):
+    def get_multi_captioning_html(self, instance: CaptioningExample, names, captions, scores, unseen_concepts, boxes, rel):
       html = []
 
       html += self.get_header("", instance.image_id)
@@ -371,7 +375,7 @@ table th {
 
       return html
 
-    def get_cls_html(self, instance: CocoBoxClsExample, answers,
+    def get_cls_html(self, instance: ClsExample, answers,
                      unseen_classes=None, seen_classes=None):
         html = []
 
@@ -435,7 +439,7 @@ def visualize_classification():
 
     src = "/Users/chris/Programming/gpv/models/t5-cls/detr1e-4-ep6/r0"
     pred = load_gpv_predictions(join(src, "eval", "gpvsce-cls-test-s1k--b20"))
-    viz = CocoVisualize("images")
+    viz = HtmlVisualizer("images")
     instances = [x for x in instances if x.get_gpv_id() in pred]
     if len(instances) == 0:
       raise ValueError()
@@ -472,7 +476,7 @@ def visualize_caption():
   for name, eval_dir in to_show.items():
     predictions[name] = load_gpv_predictions(eval_dir)
 
-  viz = CocoVisualize("images")
+  viz = HtmlVisualizer("images")
   evaluator = CaptionEvaluator(bleu=None, per_caption=True)
 
   sample = set()
@@ -532,7 +536,7 @@ def visualize_det():
     predictions[name] = load_gpv_predictions(eval_dir, load_boxes="hdf5", target_ids=targets)
 
   logging.info("Building evaluation")
-  viz = CocoVisualize("images")
+  viz = HtmlVisualizer("images")
   html = viz.get_multi_detection_table_html(instances, predictions)
 
   save_html(html, "out")
@@ -547,7 +551,7 @@ def visualize_vqa():
   assert len(targets) > 0
 
   logging.info("Building evaluation")
-  viz = CocoVisualize("images")
+  viz = HtmlVisualizer("images")
   html = viz.get_vqa_table(targets, predictions)
 
   save_html(html, "out")
@@ -557,54 +561,45 @@ def visualize_boxes():
   box_extractors = {
     # "vinvl-pre": VinVLPrecomputedFeatures(),
     # "vinvl-hdf5": Hdf5FeatureExtractor("vinvl"),
-    "base": Hdf5FeatureExtractor("vinvl-r50c4-4setvg-rboxes"),
-    "all-image": Hdf5FeatureExtractor("vinvl-r50c4-4setvg-rboxes-all-image"),
+    "base": Hdf5FeatureExtractor(["vinvl", "opensce"]),
   }
-  instances = GpvDataset(Task.VQA, "test").load()
+  # instances = GpvDataset(Task.VQA, "test").load()
+  instances = OpenSceDataset(Task.DETECTION, "val").load()
 
-  for name, v in box_extractors.items():
-    if isinstance(v, Hdf5FeatureExtractor):
-      prev_len = len(instances)
-      with h5py.File(image_utils.get_hdf5_image_file(v.source), "r") as f:
-        instances = [x for x in instances if image_utils.get_cropped_img_key(x.image_id, x.crop) in f]
-      if prev_len > len(instances):
-        logging.info(f"Filtered {prev_len}->{len(instances)} due to extractor {name}")
-        if len(instances) == 0:
-          raise ValueError("All instances filtered")
+  # for name, v in box_extractors.items():
+  #   prev_len = len(instances)
+  #   with h5py.File(image_utils.get_hdf5_image_file(v.source), "r") as f:
+  #     instances = [x for x in instances if image_utils.get_cropped_img_key(x.image_id, x.crop) in f]
+  #   if prev_len > len(instances):
+  #     logging.info(f"Filtered {prev_len}->{len(instances)} due to extractor {name}")
+  #     if len(instances) == 0:
+  #       raise ValueError("All instances filtered")
 
   np.random.RandomState(12312).shuffle(instances)
 
-  viz = CocoVisualize("images")
+  viz = HtmlVisualizer("images", "opensce-images")
 
+  box_extractors = {k: (v, v.get_collate(False)) for k, v in box_extractors.items()}
   rows = []
   for instance in instances[:10]:
     row = {}
     row["image_id"] = instance.image_id
-    for k, v in box_extractors.items():
-      fe = v.get_collate(False).collate([GPVExample(
-        "", Task.CLS, instance.image_id,  None, crop=instance.crop,
-        query_boxes=None if instance.query_box is None else np.array([instance.query_box]))])[0]
+    for k, (v, col) in box_extractors.items():
+      fe = col.collate([GPVExample(
+        "", Task.CLS, instance.image_id,  None, crop=instance.crop, query_boxes=None)])[0]
       with torch.no_grad():
         out: ImageRegionFeatures = v(**fe)
       image_boxes = out.boxes[0].numpy()
-      if out.n_query_boxes is not None and out.n_query_boxes[0] > 0:
-        objectness = out.objectness[0, :out.n_image_boxes[0]]
-        query_boxes = image_boxes[out.n_image_boxes[0]:out.n_boxes[0]]
-        image_boxes = image_boxes[:out.n_image_boxes[0]]
-      else:
-        objectness = out.objectness[0]
-        query_boxes = None
-
-      scores = np.exp(objectness.numpy())
-      print(scores.shape)
+      scores = np.exp(out.objectness[0].numpy())
 
       to_show = [
         BoxesToVisualize(image_boxes, scores, "cxcywh", "rgb(200,0,200)", True)
       ]
-      if isinstance(instance, CocoBBoxes):
+      if isinstance(instance, LocalizationExample):
         to_show.append(BoxesToVisualize(instance.bboxes, None, "xywh", "blue", False))
-      if query_boxes is not None:
-        to_show.append(BoxesToVisualize(query_boxes, None, "cxcywh", "green", True))
+
+      if isinstance(instance, ClsExample) and instance.query_box is not None:
+        to_show.append(BoxesToVisualize(np.array([instance.query_box]), None, "xywh", "blue", True))
 
       if hasattr(instance, "category"):
         row["cat"] = instance.category
@@ -619,7 +614,7 @@ def visualize_boxes():
 
 def visualize_all():
   model = "models/all/vinvl/r0"
-  viz = CocoVisualize("images")
+  viz = HtmlVisualizer("images")
   for task in GPV1_TASKS:
     dataset = GpvDataset(task, "test")
     instances = dataset.load()

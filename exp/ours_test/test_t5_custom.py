@@ -2,8 +2,7 @@ import logging
 
 from dataclasses import replace
 
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import GpvDataset, Task
 from exp.ours.models.t5_custom import OurT5Stack
 from exp.ours.models.t5_gpv import T5GPV
 from exp.ours.train.runner import BeamSearchSpec

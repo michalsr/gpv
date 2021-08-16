@@ -12,12 +12,12 @@ from typing import Dict
 
 from dataclasses import replace
 
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task, ALL_TASKS
-from exp.ours.data.source_data import CocoCaptions
+from exp.ours.data.dataset import CaptioningExample, ALL_TASKS, Task
+from exp.ours.data.gpv import GpvDataset
+from exp.ours.data.opensce import OpenSceDataset
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
-from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, DetectionEvaluator, \
-  ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator
+from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, LocalizationEvaluator, \
+  ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator, OpenSceClsEvaluator, OpenSceVqaEvaluator
 from exp.ours.train.runner import GPVExampleOutput, load_gpv_predictions
 from exp.ours.util import py_utils, our_utils
 from exp.ours.util.to_params import to_params
@@ -36,12 +36,12 @@ def find_eval_files(run_dir, prefix):
       eval_name = subdir_name.split("--")[-1]
       config = load_json_object(join(subdir, "config.json"))
       ds = config["dataset"]
-      n_sample = (ds["sample"], ds["seen_sample"], ds["unseen_sample"])
+      n_sample = (ds["sample"], ds.get("seen_sample", None), ds.get("unseen_sample", None))
       n_sample = sum(0 if x is None else x for x in n_sample)
       output[eval_name].append((subdir, None if n_sample == 0 else n_sample))
 
   def _get_order(x):
-    return x[1]
+    return 1e9 if x[1] is None else x[1]
 
   consolidated_out = {}
   for k, v in output.items():
@@ -84,6 +84,14 @@ def cache_evaluation(prefix_or_dir, evaluator, stats):
 
 
 def get_evaluator(dataset):
+  if isinstance(dataset, OpenSceDataset):
+    return {
+      Task.CLS: OpenSceClsEvaluator(),
+      Task.DETECTION: LocalizationEvaluator(),
+      Task.VQA: OpenSceVqaEvaluator(),
+      Task.CLS_IN_CONTEXT: OpenSceClsEvaluator()
+    }[dataset.get_task()], None
+
   per_caption = True
   if isinstance(dataset, GpvDataset):
     unseen_split = dataset.split == "test" and dataset.gpv_split
@@ -92,10 +100,9 @@ def get_evaluator(dataset):
 
   if unseen_split:
     def get_subsets(x):
-      if isinstance(x, CocoCaptions):
+      if isinstance(x, CaptioningExample):
         if per_caption:
-          target_cap = [cap for cap in x.captions if cap.id == x.image_id]
-          assert len(target_cap) == 1
+          target_cap = [cap for cap in x.captions if x.gpv_id == cap.gpv_id]
           is_unseen = len(target_cap[0].meta["gpv1-unseen"]) > 0
         else:
           raise NotImplementedError()
@@ -108,7 +115,7 @@ def get_evaluator(dataset):
   evaluator = {
     Task.VQA: VqaEvaluator(),
     Task.CAPTIONING: CaptionEvaluator(per_caption=per_caption, bleu=None),
-    Task.DETECTION: DetectionEvaluator(),
+    Task.DETECTION: LocalizationEvaluator(),
     Task.CLS: ClsEvaluator(),
     Task.CLS_IN_CONTEXT: ClsEvaluator(),
     Task.WEBQA: WebQaEvaluator()
@@ -117,14 +124,18 @@ def get_evaluator(dataset):
 
 
 ALL_TABLE_TASK_METRICS = {
-  Task.VQA: "score", Task.DETECTION: "AP", Task.CAPTIONING: "cider",
-  Task.CLS: "accuracy", Task.CLS_IN_CONTEXT: "accuracy", Task.WEBQA: "accuracy",
+  Task.VQA: ["score"],
+  Task.DETECTION: ["AP"],
+  Task.CAPTIONING: ["cider"],
+  Task.CLS: ("accuracy", "top5-acc"),
+  Task.CLS_IN_CONTEXT: ("accuracy", "top5-acc"),
+  Task.WEBQA: ["accuracy"],
 }
 
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("prediction_file")
+  parser.add_argument("models", nargs="+")
   add_dataset_args(parser, sample=False)
 
   parser.add_argument("--show_n", action="store_true")
@@ -159,7 +170,7 @@ def main():
     for r_ix, run in enumerate(runs):
       for prefix, dataset_name in prefixes:
         model_files = find_eval_files(run, prefix)
-        if len(model_files) == 0 and args.task != "all":
+        if len(model_files) == 0:
           logging.info(f"No predictions for model {model_name}/{dataset_name}: {run}")
         for k, v in model_files.items():
           if args.per_run:
@@ -264,10 +275,11 @@ def main():
     sorted_row = {}
     for task in ALL_TASKS:
       for subset in [None, "seen", "unseen"]:
-        metric = ALL_TABLE_TASK_METRICS[task][task]
-        k = task.value + "/" + str(ResultKey(metric, subset))
-        if k in row:
-          sorted_row[k] = row[k]
+        metrics = ALL_TABLE_TASK_METRICS[task]
+        for metric in metrics:
+          k = task.value + "/" + str(ResultKey(metric, subset))
+          if k in row:
+            sorted_row[k] = row[k]
     sorted_all_table[row_name] = sorted_row
 
   print(py_utils.dict_of_dicts_as_table_str(sorted_all_table, None))

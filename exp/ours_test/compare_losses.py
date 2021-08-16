@@ -4,8 +4,7 @@ import torch
 from omegaconf import OmegaConf
 
 from exp.gpv.models.losses import GPVCriterion
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import GpvDataset, Task
 from exp.ours.models.gpv1 import GPV1, FULLNAMES
 from exp.ours.models.losses import GPV1Loss
 from exp.ours.util import our_utils

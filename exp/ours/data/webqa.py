@@ -1,9 +1,20 @@
+import json
 from typing import List
 
-from exp.ours.data.dataset import Dataset
-from exp.ours.data.gpv_data import Task, GPVExample
+from exp.ours import file_paths
+from exp.ours.data.dataset import Dataset, Task
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.source_data import WebQaExample, load_instances
 import numpy as np
+
+from exp.ours.models.model import PredictionArg
+
+
+@PredictionArg.register("webqa-list")
+class WebQa80Answers(PredictionArg, list):
+  def __init__(self):
+    with open(file_paths.WEBQA80_ANSWERS) as f:
+      super().__init__(json.load(f))
 
 
 @Dataset.register("webqa")
@@ -15,6 +26,11 @@ class Web80QaDataset(Dataset):
       raise ValueError(split)
     self.sample = sample
     self.split = split
+
+  def get_answer_options(self, synonyms=False):
+    if synonyms:
+      raise NotImplementedError()
+    return WebQa80Answers()
 
   def get_task(self) -> Task:
     return Task.WEBQA

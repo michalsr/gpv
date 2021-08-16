@@ -8,7 +8,7 @@ from allennlp.common import FromParams, Registrable, Params
 from dataclasses import dataclass
 from torch import nn
 
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import Task
 from exp.ours.util import our_utils
 from utils.matcher import HungarianMatcher
 from utils.set_criterion import SetCriterion

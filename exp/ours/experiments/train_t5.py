@@ -3,19 +3,17 @@ import os
 
 from transformers import AutoConfig
 
-from exp.ours.data.webqa import Web80QaDataset
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
 from exp.ours.models.model_utils import BackboneParameterExtractor
-from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from exp.ours.experiments.trainer_cli import *
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import Task
 from exp.ours.models.t5_gpv import T5GPV
 from exp.ours.util import py_utils
 
@@ -48,7 +46,7 @@ def main():
   conf = AutoConfig.from_pretrained(args.model)
   t5_dim = conf.d_model
 
-  localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, ['labels', 'boxes'])
+  localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, ['labels'])
   model = T5GPV(
     args.model,
     loss=BasicGPVLoss(1, 1, 1, 1, 1, localization_loss, False),
@@ -56,7 +54,7 @@ def main():
     image_joiner=Linear(image_dim, t5_dim),
     pre_tokenize=True,
     image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
-    query_box="always",
+    query_box=None,
     all_lower_case=False
   )
 
@@ -91,19 +89,19 @@ def main():
   )
 
   # Add the WebQaDataset we want to experiment with
-  trainer.train_datasets.append(TrainerDataset(
-    Web80QaDataset(100 if args.debug else None, "train"), "webqa-tr",
-    eval_sample=50 if args.debug else 3000
-  ))
-  trainer.eval_datasets.append(TrainerDataset(
-    Web80QaDataset(100 if args.debug else None, "val"), "webqa-val",
-    eval_sample=50 if args.debug else None
-  ))
-  trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
-  trainer.evaluation[Task.WEBQA] = EvaluationSetup(
-    evaluator.WebQaEvaluator(),
-    dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=WebQa80Answers())
-  )
+  # trainer.train_datasets.append(TrainerDataset(
+  #   Web80QaDataset(100 if args.debug else None, "train"), "webqa-tr",
+  #   eval_sample=50 if args.debug else 3000
+  # ))
+  # trainer.eval_datasets.append(TrainerDataset(
+  #   Web80QaDataset(100 if args.debug else None, "val"), "webqa-val",
+  #   eval_sample=50 if args.debug else None
+  # ))
+  # trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
+  # trainer.evaluation[Task.WEBQA] = EvaluationSetup(
+  #   evaluator.WebQaEvaluator(),
+  #   dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=WebQa80Answers())
+  # )
 
   run_trainer_from_args(trainer, model, args)
 

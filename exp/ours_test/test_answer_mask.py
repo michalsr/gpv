@@ -5,7 +5,7 @@ from torch.nn import functional as F
 import numpy as np
 from transformers import T5Tokenizer
 
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import Task
 from exp.ours.experimental.answer_masking import AnswerMask, TokenizedWordSearcher, AnswerMaskBuilder
 
 

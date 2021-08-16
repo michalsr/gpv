@@ -6,8 +6,9 @@ import torch
 import torchvision
 from tqdm import tqdm
 
-from exp.ours.data.dataset import GpvDataset
-from exp.ours.data.gpv_data import Task, GPVExample
+from exp.ours.data.dataset import Task
+from exp.ours.data.gpv import GpvDataset
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractorCollate
 from exp.ours.util import image_utils, py_utils
 

@@ -6,7 +6,7 @@ import os
 
 import h5py
 
-from exp.ours.boosting import SceUnseenCategories, CocoCategoryVoc, CocoCategories, WebQa80Answers
+from exp.ours.boosting import SceUnseenCategories
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -21,8 +21,7 @@ from dataclasses import dataclass
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.util import our_utils, py_utils, image_utils
-from exp.ours.data.dataset import Dataset
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import Dataset, Task
 from exp.ours.train.runner import BeamSearchSpec, save_gpv_output, \
   run, prediction_args_to_json
 from exp.ours.util.to_params import to_params
@@ -39,8 +38,8 @@ class EvaluationConfig(Registrable):
 # These make sense for T5 based on the train data, maybe not for other models
 DEFAULT_MAX_SEQ_LEN = {
   Task.VQA: 20,
-  Task.CLS: 6,
-  Task.CLS_IN_CONTEXT: 6,
+  Task.CLS: 8,
+  Task.CLS_IN_CONTEXT: 8,
   Task.WEBQA: 8,
   Task.CAPTIONING: 30
 }
@@ -108,18 +107,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
 
   if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
     logging.info("Using classification mask")
-    if task == Task.WEBQA:
-      if args.cls_mask == "categories":
-        prediction_args["answer_options"] = WebQa80Answers()
-      elif args.cls_mask == "synonyms":
-        raise NotImplementedError()
-    else:
-      if args.cls_mask == "categories":
-        prediction_args["answer_options"] = CocoCategories()
-      elif args.cls_mask == "synonyms":
-        prediction_args["answer_options"] = CocoCategories(synonyms=True)
-      else:
-        raise ValueError(args.cls_mask)
+    prediction_args["answer_options"] = dataset.get_answer_options(args.cls_mask == "synonyms")
 
   if args.dry_run:
     logging.info("Skipping running the model since this is a dry run")

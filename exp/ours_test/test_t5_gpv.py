@@ -4,7 +4,8 @@ from transformers import AutoTokenizer
 
 import torchvision.transforms as T
 
-from exp.ours.data.gpv_data import GPVExample, Task
+from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.dataset import Task
 from exp.ours.models.t5_gpv import T5Collate
 from exp.ours.util.image_utils import DUMMY_IMAGE_ID
 from exp.ours.util.nlp_utils import encode_with_cache

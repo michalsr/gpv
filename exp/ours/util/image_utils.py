@@ -1,9 +1,10 @@
 import logging
+import os
 import struct
 from collections import defaultdict
 from multiprocessing import Lock, Pool
 from os import listdir, mkdir
-from os.path import join, isdir, exists
+from os.path import join, isdir, exists, relpath
 from typing import Tuple, Optional, Union
 
 import imagesize
@@ -34,6 +35,7 @@ def _build_image_file_map():
       continue
     for file in listdir(dirname):
       file_map[imageid_from_file(file)] = join(dirname, file)
+
   return file_map
 
 
@@ -49,12 +51,17 @@ def get_image_file(image_id):
     return image_file
 
   if isinstance(image_id, str):
-    # Assume string ids are web images
-    return join(file_paths.WEB_IMAGES_DIR, image_id)
+    # TODO we should probably make image_id structured, but for now
+    # select what kind of image based on the fact web images do not have a file ending
+    if image_id.endswith(".jpg"):
+      return join(file_paths.OPENSCE_IMAGES, image_id)
+    else:
+      return join(file_paths.WEB_IMAGES_DIR, image_id)
 
   global _IMAGE_ID_TO_FILE_MAP
   if _IMAGE_ID_TO_FILE_MAP is None:
     _IMAGE_ID_TO_FILE_MAP = _build_image_file_map()
+
   if image_id not in _IMAGE_ID_TO_FILE_MAP:
     raise ValueError(f"Missing file for image {image_id} in {file_paths.COCO_IMAGES}")
   return _IMAGE_ID_TO_FILE_MAP[image_id]
@@ -90,6 +97,10 @@ def crop_img(img: Union[np.ndarray, Image.Image], crop):
   else:
     W, H = img.size
 
+  if all(c <= 1.0 for c in crop):
+    # Assume the crop is in normalized coordinates
+    x, y, w, h = x*W, y*H, w*W, h*H
+
   if w < 5: w = 5
   if h < 5: h = 5
   x1 = x - 0.2 * w
@@ -110,6 +121,12 @@ def get_box_key(box):
 
 
 def get_cropped_img_key(image_id, crop=None):
+  image_id = str(image_id)
+
+  # Replace "/" to avoid hdf5 building hierarchical groups
+  if "-" in image_id:
+    raise ValueError()
+  image_id = str(image_id).replace("/", "-")
   if crop is None:
     return str(image_id)
   return f"{image_id}-{get_box_key(crop)}"

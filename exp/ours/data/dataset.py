@@ -1,13 +1,58 @@
-from typing import List
+import enum
+from typing import List, Union, Optional, Tuple, Dict, Counter, Any
 
-from allennlp.common import Registrable
+from allennlp.common import Registrable, FromParams
+from dataclasses import dataclass
 
-from exp.ours.data import source_data
 import numpy as np
 
-from exp.ours.data.source_data import ID_TO_COCO_CATEGORY, CocoCaptions
-from exp.ours.data.gpv_data import Task
-from exp.ours.util.py_utils import int_to_str
+
+class Task(FromParams, enum.Enum):
+  CLS = "cls"
+  VQA = "vqa"
+  DETECTION = "det"
+  CAPTIONING = "cap"
+  CLS_IN_CONTEXT = "cic"
+  WEBQA = "webqa"
+
+  @classmethod
+  def from_params(
+      cls,
+      params,
+      constructor_to_call=None,
+      constructor_to_inspect=None,
+      **extras,
+  ):
+    # Need a custom method here due to some interactions between
+    # FromParams/Enum
+    return Task(params["type"])
+
+  def to_params(self):
+    # Params objects can represent classes with no args as just strings
+    # We do that here, which is easier to read and makes sure we can use
+    # `Task` objects as keys in maps
+    return self._value_
+
+  def __str__(self):
+    return self._value_
+
+  def __reduce_ex__(self, protocol):
+    # Adding `FromParam` makes enum.Enum think the default unpickle implementation will
+    # fail, so it helpfully breaks pickling so we fail fast when saving with pickle.
+    # In fact, the default unpickle implementation is fine because `FromParams` does not
+    # add any state, so we do this redundant override of __reduce_ex__ so `enum.Enum` trusts
+    # that the object can be pickled
+    return enum.Enum.__reduce_ex__(self, protocol)
+
+  def to(self, device):
+    return self
+
+
+GPV1_TASKS = [Task.VQA, Task.CAPTIONING, Task.DETECTION, Task.CLS]
+
+GPV2_TASKS = GPV1_TASKS + [Task.CLS_IN_CONTEXT]
+
+ALL_TASKS = GPV2_TASKS + [Task.WEBQA]
 
 
 class Dataset(Registrable):
@@ -15,11 +60,77 @@ class Dataset(Registrable):
   def get_task(self) -> Task:
     raise NotImplementedError()
 
+  def get_answer_options(self, synonyms=False):
+    raise NotImplementedError()
+
   def get_name(self) -> str:
     raise NotImplementedError()
 
   def load(self) -> List:
     raise NotImplementedError()
+
+
+@dataclass(frozen=True)
+class ClsExample:
+  gpv_id: str
+  task: Task
+  image_id: Union[int, str]
+  category: str
+  crop: Optional[Tuple[float, float, float, float]] = None
+  query_box: Optional[Tuple[float, float, float, float]] = None
+  meta: Optional[Dict] = None
+
+  def __post_init__(self):
+    if self.crop is not None and self.query_box is not None:
+      raise ValueError("Both crop and query not supported")
+
+  def get_gpv_id(self):
+    return self.gpv_id
+
+
+@dataclass(frozen=True)
+class VqaExample:
+  gpv_id: str
+  image_id: Union[int, str]
+  question: str
+  answers: Union[str, Counter]
+  meta: Optional[Dict] = None
+
+  def get_gpv_id(self):
+    return self.gpv_id
+
+
+@dataclass(frozen=True)
+class LocalizationExample:
+  gpv_id: str
+  image_id: Union[int, str]
+  bboxes: np.ndarray
+  category: str
+  meta: Optional[Dict] = None
+
+  def get_gpv_id(self):
+    return self.gpv_id
+
+
+@dataclass(frozen=True)
+class Caption:
+  gpv_id: str
+  caption: Optional[str]
+  meta: Optional[Dict[str, Any]] = None
+
+  def get_gpv_id(self):
+    return self.gpv_id
+
+
+@dataclass(frozen=True)
+class CaptioningExample:
+  gpv_id: str
+  image_id: str
+  captions: List[Caption]
+  meta: Optional[Dict[str, Any]] = None
+
+  def get_gpv_id(self):
+    return self.gpv_id
 
 
 class InMemoryDataset(Dataset):
@@ -36,84 +147,3 @@ class InMemoryDataset(Dataset):
 
   def load(self) -> List:
     return self.data
-
-
-def split_seen_unseen(instances):
-  unseen_instances = []
-  seen_instances = []
-  for instance in instances:
-    if isinstance(instance, CocoCaptions):
-      unseen = sum(len(x.meta["gpv1-unseen"]) > 0 for x in instance.captions)
-      unseen = unseen > 1
-    else:
-      unseen = instance.meta["gpv1-unseen"]
-    if unseen:
-      unseen_instances.append(instance)
-    else:
-      seen_instances.append(instance)
-  return unseen_instances, seen_instances
-
-
-@Dataset.register("gpv")
-class GpvDataset(Dataset):
-  KINDS = {
-    Task.VQA: source_data.load_gpv_vqa,
-    Task.CLS: source_data.load_gpv_cls,
-    Task.CLS_IN_CONTEXT: source_data.load_gpv_ident,
-    Task.CAPTIONING: source_data.load_gpv_captioning,
-    Task.DETECTION: source_data.load_gpv_boxes,
-  }
-
-  UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
-             'sheep', 'suitcase', 'surfboard', 'wine glass']
-  UNSEEN2 = ['banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
-             'hot dog', 'keyboard', 'laptop', 'train', 'tv']
-
-  UNSEEN_GROUPS = {
-    Task.VQA: UNSEEN1,
-    Task.CLS: UNSEEN2,
-    Task.CLS_IN_CONTEXT: UNSEEN2,
-    Task.CAPTIONING: UNSEEN1,
-    Task.DETECTION: UNSEEN2,
-  }
-
-  def __init__(self, task: Task, split: str, gpv_split=True,
-               sample=None, seen_sample=None, unseen_sample=None):
-    if split not in {"test", "val", "train"}:
-      raise ValueError(split)
-    if sample is not None and (seen_sample is not None or unseen_sample is not None):
-      raise ValueError("Cannot specify sample and seen/unseen sample")
-    self.sample = sample
-    self.task = task
-    self.split = split
-    self.gpv_split = gpv_split
-    self.seen_sample = seen_sample
-    self.unseen_sample = unseen_sample
-
-  def get_name(self):
-    kind = "gpvsce" if self.gpv_split else "gpv"
-    name = f"{kind}-{self.task}-{self.split}"
-    if self.seen_sample is not None:
-      name += f"-se{int_to_str(self.seen_sample)}"
-    if self.unseen_sample is not None:
-      name += f"-us{int_to_str(self.unseen_sample)}"
-    if self.sample is not None:
-      name += f"-s{int_to_str(self.sample)}"
-    return name
-
-  def get_task(self) -> Task:
-    return self.task
-
-  def load(self):
-    instances = self.KINDS[self.task](self.split, self.gpv_split)
-    if self.seen_sample is not None or self.unseen_sample is not None:
-      instances.sort(key=lambda x: x.get_gpv_id())
-      np.random.RandomState(613423).shuffle(instances)
-      unseen, seen = split_seen_unseen(instances)
-      return unseen[:self.unseen_sample] + seen[:self.seen_sample]
-    elif self.sample:
-      instances.sort(key=lambda x: x.get_gpv_id())
-      np.random.RandomState(613423).shuffle(instances)
-      return instances[:self.sample]
-    else:
-      return instances

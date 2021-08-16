@@ -4,7 +4,7 @@ import math
 import os
 import re
 import socket
-from collections import defaultdict
+from collections import defaultdict, Counter
 from datetime import datetime
 from os import mkdir, makedirs, getpid
 from time import perf_counter
@@ -18,7 +18,6 @@ from typing import List, Optional, Dict, Any, Union, Tuple
 from allennlp.common import FromParams, Params, Registrable
 from allennlp.common.util import lazy_groups_of
 from dataclasses import dataclass, replace
-from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -28,8 +27,7 @@ from torch import distributed as dist
 from exp.ours import file_paths
 from exp.ours.data.dataset_builder import DatasetBuilder
 from exp.ours.util import our_utils, py_utils, image_utils
-from exp.ours.data.dataset import Dataset
-from exp.ours.data.gpv_data import Task
+from exp.ours.data.dataset import Dataset, Task
 from exp.ours.models.model import GPVModel
 from exp.ours.util.our_utils import SubsetSampler, DistributedSubsetSampler, select_run_dir
 from exp.ours.util.py_utils import clear_if_nonempty, duration_to_str
@@ -400,6 +398,8 @@ class Trainer(FromParams):
     all_train = py_utils.flatten_list(model.preprocess_example_train(x) for x in all_train)
 
     if len(set(x.id for x in all_train)) != len(all_train):
+      c = Counter(x.id for x in all_train)
+      print([k for k, v in c.items() if v > 1])
       raise ValueError("Repeated IDs in train")
     # Ensure order is consistent between processes/training runs
     all_train.sort(key=lambda ex: ex.id)

@@ -18,21 +18,21 @@ from exp.ours.boosting import MaskSpec
 from exp.gpv.metrics import create_coco_vocab_mask
 from exp.gpv.models.gpv import GPV
 from exp.ours import file_paths
-from exp.ours.data.dataset import GpvDataset
+from exp.ours.data.dataset import *
+from exp.ours.data.gpv import ID_TO_COCO_CATEGORY
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageCollater
 from exp.ours.train.runner import BeamSearchSpec
 from exp.ours.util import our_utils, py_utils
 
-from exp.ours.data.source_data import VqaQuestion, CocoBoxClsExample, CocoCaptions, ID_TO_COCO_CATEGORY, CocoBBoxes, WebQaExample
-from exp.ours.data.gpv_data import GPVExample, Task
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.models.model import GPVModel
 from exp.ours.util.to_params import to_params_any
 
 
 def gpv1_convert(example, train):
-  if isinstance(example, VqaQuestion):
+  if isinstance(example, VqaExample):
     return [GPVExample(
-      example.get_gpv_id(),
+      example.gpv_id,
       Task.VQA,
       example.image_id,
       example.question,
@@ -40,30 +40,20 @@ def gpv1_convert(example, train):
       target_answer=example.meta["gpv1-answer"],
       meta=example.meta
     )]
-  elif isinstance(example, CocoBoxClsExample):
+  elif isinstance(example, ClsExample):
     return [GPVExample(
-      example.get_gpv_id(),
+      example.gpv_id,
       Task.CLS,
       example.image_id,
       example.meta["gpv1-query"],
-      crop=example.box,
+      crop=example.crop,
       target_boxes=None,
-      target_answer=ID_TO_COCO_CATEGORY[example.category_id],
+      target_answer=example.category,
       meta=example.meta
     )]
-  elif isinstance(example, WebQaExample):
+  elif isinstance(example, LocalizationExample):
     return [GPVExample(
-      example.get_gpv_id(),
-      Task.WEBQA,
-      example.image_id,
-      example.meta["gpv1-query"],
-      target_boxes=None,
-      target_answer=example.answer,
-      meta=example.meta
-    )] 
-  elif isinstance(example, CocoBBoxes):
-    return [GPVExample(
-      example.get_gpv_id(),
+      example.gpv_id,
       Task.DETECTION,
       example.image_id,
       example.meta["gpv1-query"],
@@ -71,12 +61,12 @@ def gpv1_convert(example, train):
       target_answer=None,
       meta=example.meta
     )]
-  elif isinstance(example, CocoCaptions):
+  elif isinstance(example, CaptioningExample):
     if train:
       out = []
       for cap in example.captions:
         out.append(GPVExample(
-          cap.get_gpv_id(),
+          cap.gpv_id,
           Task.CAPTIONING,
           example.image_id,
           cap.meta["gpv1-query"],
@@ -87,7 +77,7 @@ def gpv1_convert(example, train):
       return out
     else:
       return [GPVExample(
-        example.get_gpv_id(),
+        example.gpv_id,
         Task.CAPTIONING,
         example.image_id,
         [cap.meta["gpv1-query"] for cap in example.captions],
