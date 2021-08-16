@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 
-from exp.ours.data.dataset import GPV1_TASKS, GPV2_TASKS
+from exp.ours.data.dataset import GPV1_TASKS, GPV2_TASKS, Task
 from exp.ours.data.gpv import GpvDataset, CocoCategories
 from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.util.our_utils import get_devices

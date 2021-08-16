@@ -17,3 +17,4 @@ git+https://github.com/ildoonet/pytorch-gradual-warmup-lr.git
 boto3==1.16.25
 pytorch_transformers==1.0.0
 imagesize==1.2.0
+yacs==0.1.8

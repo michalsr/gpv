@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
 from exp.ours.data.dataset import Task
-from exp.ours.data.gpv import GpvDataset, ID_TO_COCO_CATEGORY
+from exp.ours.data.gpv import GpvDataset, COCO_CATEGORIES
 from exp.ours.train.runner import PredictionArg
 from exp.ours.util import py_utils
 
@@ -40,7 +40,7 @@ class CocoCategoryVoc(MaskSpec):
   def get_target_words(self):
     if self.syn:
       raise NotImplementedError()
-    return list(ID_TO_COCO_CATEGORY.values())
+    return list(COCO_CATEGORIES)
 
   def get_inverse(self):
     return self.inverse
@@ -61,7 +61,7 @@ class SceSeenCategories(MaskSpec):
 
   def get_target_words(self):
     unseen = set(GpvDataset.UNSEEN_GROUPS[self.task])
-    return [x for x in ID_TO_COCO_CATEGORY.values() if x in unseen]
+    return [x for x in COCO_CATEGORIES if x in unseen]
 
 
 @dataclass

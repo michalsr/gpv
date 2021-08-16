@@ -428,4 +428,3 @@ def build_vocab_mask(labels, to_mask: List[List[List[int]]], voc_size, eos_id=No
         elif len(candidate) > seq_ix:
           raise None
   return out
-

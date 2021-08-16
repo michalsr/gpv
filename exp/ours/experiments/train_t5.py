@@ -3,6 +3,7 @@ import os
 
 from transformers import AutoConfig
 
+from exp.ours.data.webqa import Web80QaDataset, WebQa80Answers
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
