@@ -107,5 +107,4 @@ class CollateWithTokenizer(Callable):
 
     if self.other_collate:
       out.update(self.other_collate.collate(batch, out))
-
     return out
