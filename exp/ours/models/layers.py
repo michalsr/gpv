@@ -111,12 +111,20 @@ class SumWithObjectness(Layer):
       else:
         raise NotImplementedError()
     else:
+      # This min stops NaN occurring if the objectness score is too close to log(1) = 0
+      # This has occured in (very) rare cases for the VinVL model, in particular for images
+      # 8cdae499db22a787a5274d4ee2255315964e1144ab3f95665144c90e24d79917
+      # 597caa946a207ef96ede01a53321ff4fdf000a48707ea7c495627330b3ee4b90
+      assert torch.all(objectness <= 0.0)
+      objectness = torch.minimum(
+        objectness, torch.as_tensor([-1e-6], device=objectness.device, dtype=objectness.dtype))
       object_lp = objectness
       non_object_lp = torch.log1p(-torch.exp(object_lp))
 
     objectness = object_lp - non_object_lp
     if factor is not None:
       objectness = objectness * factor
+
     return image_rel + objectness
 
 
