@@ -31,22 +31,24 @@ def load_model(run_dir, use_best_weights=True, device=None,
     src = join(run_dir, f"state-ep{epoch}.pth")
     if not exists(src):
       raise ValueError(f"Requested epoch {epoch} not found in {run_dir}")
-
+    state_dict = torch.load(src, map_location="cpu")
   else:
+    state_dict = None
     if use_best_weights:
       src = join(run_dir, BEST_STATE_NAME)
-      if not exists(src):
-        src = None
+      if exists(src):
+        state_dict = torch.load(src, map_location="cpu")
+      else:
         if not quiet:
           logging.info(f"No best-path found for {run_dir}, using last saved state")
 
-    if src is None:
-      raise NotImplementedError()
+    if state_dict is None:
+      checkpoint = join(run_dir, "checkpoint.pth")
+      state_dict = torch.load(checkpoint, map_location="cpu").model_state
 
   if not quiet:
     logging.info("Loading model state from %s" % src)
   # TODO is there way to efficently load the parameters straight to the gpu?
-  state_dict = torch.load(src, map_location="cpu")
   model.load_state_dict(state_dict)
   if device is not None:
     model.to(device)
@@ -54,6 +56,6 @@ def load_model(run_dir, use_best_weights=True, device=None,
 
   # allow state_dict to get freed from memory
   state_dict = None
-  del(state_dict)
+  del state_dict
 
   return model
