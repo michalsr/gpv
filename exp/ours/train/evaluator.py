@@ -80,7 +80,7 @@ class PerExampleEvaluator(Evaluator):
       mean=True,
       subset_mapping=None
   ) -> Dict[ResultKey, Number]:
-    examples_with_predictions = [x for x in examples if x.gpv_id in predictions]
+    examples_with_predictions = [x for x in examples if x.get_gpv_id() in predictions]
     if not allow_partial and (len(examples) != len(examples_with_predictions)):
       raise ValueError(f"Only {len(examples_with_predictions)}/{len(examples)} "
                        f"of examples have predictions")
@@ -181,6 +181,14 @@ class OpenSceVqaEvaluator(PerExampleEvaluator):
   nlp = spacy.load('en_core_web_sm')
 
   @staticmethod
+  def answer_match_iou(cand_tokens: List[str], ref_tokens: List[str]) -> float:
+    cset = set(cand_tokens)
+    rset = set(ref_tokens)
+    intersection = len(cset.intersection(rset))
+    union = len(cset.union(rset))
+    return intersection / union
+
+  @staticmethod
   def get_tokens(txt: str):
     lemmas = [t.lemma_ for t in OpenSceVqaEvaluator.nlp(txt)]
     articles = ['a','an','the']
@@ -205,11 +213,17 @@ class OpenSceVqaEvaluator(PerExampleEvaluator):
   def evaluate_examples(self, examples: List[VqaExample], predictions: Dict[str, GPVExampleOutput]):
     out = []
     for example in examples:
-      answers = [x.lower() for x in predictions[example.get_gpv_id()].text]
-      vals = dict(accuracy=OpenSceVqaEvaluator.compute_accuracy(example.answers, answers, 1))
+      max_k = max(self.top_k) if self.top_k else 1
+      answers = [self.get_tokens(x.lower()) for x in predictions[example.get_gpv_id()].text[:max_k]]
+      gt = self.get_tokens(example.answers.lower())
+      vals = dict(
+        acc=gt == answers[0],
+        iou=OpenSceVqaEvaluator.answer_match_iou(gt, answers[0])
+      )
       if self.top_k:
         for k in self.top_k:
-          vals[f"top{k}-acc"] = OpenSceVqaEvaluator.compute_accuracy(example.answers, answers, k)
+          vals[f"top{k}-acc"] = float(any(x == gt for x in answers[:k]))
+          vals[f"top{k}-iou"] = max(OpenSceVqaEvaluator.answer_match_iou(x, gt) for x in answers[:k])
       out.append(vals)
     return out
 
