@@ -109,7 +109,7 @@ class RunArgs(FromParams):
     elif isinstance(args, list) and len(args) == 1 and not force_one_process:
       args = args[0]
     if seed is None:
-      seed = np.random.randint(-2**30, 2**30)
+      seed = np.random.randint(0, 2**28)
 
     if dist_port is not None:
       dist_port = f'tcp://localhost:{dist_port}'
@@ -405,7 +405,15 @@ class Trainer(FromParams):
     all_train.sort(key=lambda ex: ex.id)
 
     if self.train_dataset_builder is not None:
-      all_train = self.train_dataset_builder.build(all_train)
+      all_train = self.train_dataset_builder.build(all_train, runtime.seed)
+      # Do this here since the length might not be valid until after set_epoch
+      if hasattr(all_train, "set_epoch"):
+        all_train.set_epoch(0)
+        if self.train_loader.persist_workers:
+          # Persistent workers have a good chance of breaking things if
+          # the dataset is changing itself each epoch from `set_epoch`
+          # TODO maybe we should just re-build the data loader in that case
+          raise ValueError()
 
     batch_size = self.train_loader.batch_size
 
@@ -889,8 +897,10 @@ class Trainer(FromParams):
     logging.info(f"Have {n_train} params and {n_freeze} frozen parameters")
 
     for epoch in range(train_state.epoch, self.epochs):
-      if hasattr(train_loader.dataset, "set_epoch"):
+      if epoch > 0 and  hasattr(train_loader.dataset, "set_epoch"):
         train_loader.dataset.set_epoch(epoch)
+        n_train_batches = len(train_loader)
+
       ep_start = perf_counter()
       model.train()
 
