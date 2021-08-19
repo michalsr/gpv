@@ -65,7 +65,10 @@ class CollateWithTokenizer(Callable):
     for ex in batch:
       q = ex.query[np.random.randint(0, len(ex.query))]
 
-      if ex.target_answer is None:
+      if ex.target_answer is None or len(ex.target_answer) == 0:
+        # This is a bit messy since it conflates no output text requested (therefore, a
+        # detection examples) with an unlabelled example (predicting a caption with no known label),
+        # although there is no harm done since we ignore the labels when predicting anyway
         if self.pre_tokenized:
           a = np.array([self.tokenizer.pad_token_id], dtype=np.int)
         else:
