@@ -46,7 +46,7 @@ class WebQaDataset(Dataset):
     self.question_types = question_types
 
   def get_name(self) -> str:
-    name = f"{self.name}-{self.split}"
+    name = f"webqa-{self.name}-{self.split}"
     if self.question_types != "all":
       if self.question_types == "noun-cls":
         name = "-nouncls"
@@ -62,7 +62,7 @@ class WebQaDataset(Dataset):
     return WebQaAnswers(self.name, self.question_types)
 
   def get_task(self) -> Task:
-    return Task.WEBQA
+    return Task.CLS
 
   def load(self) -> List[GPVExample]:
     instances = load_webqa(self.name, self.split)
