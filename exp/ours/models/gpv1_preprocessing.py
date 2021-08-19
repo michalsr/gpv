@@ -143,7 +143,7 @@ class Gpv1Preprocessor(FromParams):
           self.caption_queries_tok,
           None,
           query_boxes=all_image_box,
-          target_answer=[self.preprocess_text(x.caption) for x in example.captions],
+          target_answer=[self.preprocess_text(x.caption) for x in example.captions if x.caption is not None],
           meta=example.meta if include_meta else None
         )]
     elif isinstance(example, LocalizationExample):
