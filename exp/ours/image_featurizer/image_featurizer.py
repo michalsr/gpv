@@ -507,8 +507,10 @@ class MultiHdf5FeatureExtractorCollate(ImageCollater):
 
         if self.return_features:
           features.append(torch.as_tensor(grp['features'][:]))
+          assert len(features[-1]) == len(image_boxes)
         if self.return_objectness:
           objectness.append(torch.as_tensor(grp['objectness'][:]))
+          assert len(objectness[-1]) == len(image_boxes)
 
         if ex.query_boxes is not None:
           # Load recorded query features/objectness
@@ -543,6 +545,7 @@ class MultiHdf5FeatureExtractorCollate(ImageCollater):
          if self.return_objectness else None),
         n_boxes,
       )
+
     return dict(features=fe), target
 
 
