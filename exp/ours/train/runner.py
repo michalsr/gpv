@@ -138,6 +138,8 @@ def _run_worker(
 def run(model_source, examples, device,
              batch_size, num_workers, prediction_args, beams_to_keep=1,
              desc="eval", nopbar=False):
+  if len(set(ex.get_gpv_id() for ex in examples)) != len(examples):
+    raise ValueError("Repeated ids in examples")
   if isinstance(device, list):
     return run_dist(
       model_source, examples, device,
