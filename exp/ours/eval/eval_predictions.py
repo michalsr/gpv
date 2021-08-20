@@ -8,13 +8,14 @@ from collections import defaultdict
 from datetime import datetime
 from os import listdir
 from os.path import join, exists, isdir, dirname
-from typing import Dict
+from typing import Dict, List
 
 from dataclasses import replace
 
+from data.coco.synonyms import SYNONYMS
 from exp.ours.data.dataset import CaptioningExample, ALL_TASKS, Task
-from exp.ours.data.gpv import GpvDataset
-from exp.ours.data.opensce import OpenSceDataset
+from exp.ours.data.gpv import GpvDataset, COCO_CATEGORIES
+from exp.ours.data.opensce import OpenSceDataset, OPENSCE_TASKS
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, LocalizationEvaluator, \
   ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator, OpenSceClsEvaluator, OpenSceVqaEvaluator
@@ -55,6 +56,15 @@ def get_eval_if_cached(eval_dir):
   cache_file = join(eval_dir, "eval.json")
   if exists(cache_file):
     cached = load_json_object(cache_file)
+    if isinstance(cached, list) and "in-domain" in cached[0]:
+      # a nocaps eval file
+      stats = {}
+      for part in cached:
+        for subset, r in part.items():
+          for metric_name, val in r.items():
+            stats[ResultKey(metric_name, subset)] = val
+      return stats
+
     if "version" in cached:
       stats_str = cached["stats"]
       stats = {}
@@ -85,12 +95,29 @@ def cache_evaluation(prefix_or_dir, evaluator, stats):
 
 def get_evaluator(dataset):
   if isinstance(dataset, OpenSceDataset):
+    if dataset.get_task() == Task.CAPTIONING:
+      raise ValueError("OpenSce caption eval not supported")
+    if dataset.get_task() in {Task.CLS, Task.CLS_IN_CONTEXT}:
+      unseen = GpvDataset.UNSEEN_GROUPS[Task.CLS]
+      seen = set(py_utils.flatten_list(SYNONYMS[x] for x in COCO_CATEGORIES if x not in unseen))
+      unseen = set(py_utils.flatten_list(SYNONYMS[x] for x in unseen))
+
+      def get_subsets(x):
+        if x.category in seen:
+          return ["seen"]
+        elif x.category not in unseen:
+          return ["unseen"]
+        else:
+          return  []
+    else:
+      get_subsets = None
+
     return {
       Task.CLS: OpenSceClsEvaluator(),
       Task.DETECTION: LocalizationEvaluator(),
       Task.VQA: OpenSceVqaEvaluator(),
       Task.CLS_IN_CONTEXT: OpenSceClsEvaluator()
-    }[dataset.get_task()], None
+    }[dataset.get_task()], get_subsets
 
   per_caption = True
   if isinstance(dataset, GpvDataset):
@@ -133,6 +160,49 @@ ALL_TABLE_TASK_METRICS = {
 }
 
 
+def _build_order():
+  dataset_order = []
+  for part in ["val", "test"]:
+    for task in [Task.CLS, Task.CLS_IN_CONTEXT, Task.DETECTION,
+                 Task.VQA, Task.CAPTIONING]:
+      dataset_order.append(OpenSceDataset(task, part).get_name())
+  for part in ["val", "test"]:
+    for task in [Task.VQA, Task.CAPTIONING, Task.DETECTION,
+                 Task.CLS, Task.CLS_IN_CONTEXT]:
+      dataset_order.append(GpvDataset(task, part).get_name())
+  return {k: i for i, k in enumerate(dataset_order)}
+
+
+DATASET_ORDER = _build_order()
+
+METRIC_ORDER = {k: i for i, k in enumerate([
+  "iou",
+  "top5-iou",
+  "acc",
+  "accuracy",
+  "top5-acc",
+])}
+
+
+def sort_and_remap_keys(keys: List[ResultKey]) -> Dict[ResultKey, str]:
+  opensce_cap_names = {OpenSceDataset(Task.CAPTIONING, x).get_name() for x in ["val", "test"]}
+  out = {}
+  for key in keys:
+    if key.dataset_name in opensce_cap_names:
+      if key.metric_name.lower() == "cider" and key.subset_name in {"out-domain", "in-domain"}:
+        out[key] = f"cider/{key.subset_name}-{key.metric_name}"
+    elif key.dataset_name.startswith("opensce") and key.subset_name is not None:
+      continue
+    else:
+      task_name = key.dataset_name.split("-")[-1]
+      out[key] = f"{task_name}/{key.metric_name}"
+
+  def _order(key):
+    return DATASET_ORDER[key.dataset_name], METRIC_ORDER.get(key.metric_name, 100)
+  keys = sorted(out, key=_order)
+  return {k: out[k] for k in keys}
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("models", nargs="+")
@@ -151,7 +221,7 @@ def main():
     raise ValueError("Cannot sample if caching")
 
   # Figure out what prediction directories we are going to evaluate
-  model_dirs = our_utils.find_models(args.prediction_file)
+  model_dirs = our_utils.find_models(args.models)
 
   # [model_name, eval_name, run_name, dataset_name] -> prediction dir
   target_files = {}
@@ -171,7 +241,7 @@ def main():
       for prefix, dataset_name in prefixes:
         model_files = find_eval_files(run, prefix)
         if len(model_files) == 0:
-          logging.info(f"No predictions for model {model_name}/{dataset_name}: {run}")
+          logging.info(f"No predictions for model {dataset_name}: {run}")
         for k, v in model_files.items():
           if args.per_run:
             target_files[(model_name + f"/{r_ix}", k, 0, dataset_name)] = v
@@ -190,7 +260,8 @@ def main():
       cached = get_eval_if_cached(eval_dir)
       if cached:
         logging.info(f"Loaded cached stats for {eval_dir}")
-        results[key] = cached
+        dataset_name = eval_dir.split("/")[-1].split("--")[0]
+        results[key] = {replace(k, dataset_name=dataset_name): v for k, v in cached.items()}
       else:
         to_eval[key] = eval_dir
 
@@ -244,7 +315,9 @@ def main():
     per_dataset[ds_name][(model_name, eval_name)].append(stats)
 
   all_table = defaultdict(dict)
+  per_model_reults  = {}
   for ds_name, grouped in per_dataset.items():
+    grouped = per_dataset[ds_name]
     task = name_to_dataset[ds_name].get_task()
     if task != Task.CAPTIONING:
       factor = 100
@@ -253,36 +326,26 @@ def main():
       val_format = "%.3f"
       factor = 1
     
-    for key, results in grouped.items():
+    for (model_name, eval_name), results in grouped.items():
       n_runs = len(results)
       results = py_utils.transpose_list_of_dicts(results)
       results = {
-        str(replace(k, dataset_name=None)): np.mean(v)*(1 if k.metric_name == "n" else factor) for k, v
+        k: np.mean(v)*(1 if k.metric_name == "n" else factor) for k, v
         in results.items() if (args.show_n or k.metric_name != "n")}
-      all_table["/".join(key)].update({task.value + "/" + str(k): val_format % v for k, v in results.items()})
+      all_table[f"{model_name}/{eval_name}"].update({k: val_format % v for k, v in results.items()})
       if n_runs > 1:
         results["n-runs"] = n_runs
-      grouped[key] = results
+      per_model_reults[(model_name, eval_name)] = results
 
-    to_show = []
-    for (model_name, eval_name), to_show_stats in grouped.items():
-      model_stats = dict(model=model_name, eval=eval_name)
-      model_stats.update(to_show_stats)
-      to_show.append(model_stats)
+  all_keys = set()
+  for stats in all_table.values():
+    all_keys.update(stats.keys())
+  remapped_keys = sort_and_remap_keys(list(all_keys))
+  for row_name, row in list(all_table.items()):
+    all_table[row_name] = {name: row[key] for key, name in remapped_keys.items() if key in row}
 
-  sorted_all_table = {}
-  for row_name, row in all_table.items():
-    sorted_row = {}
-    for task in ALL_TASKS:
-      for subset in [None, "seen", "unseen"]:
-        metrics = ALL_TABLE_TASK_METRICS[task]
-        for metric in metrics:
-          k = task.value + "/" + str(ResultKey(metric, subset))
-          if k in row:
-            sorted_row[k] = row[k]
-    sorted_all_table[row_name] = sorted_row
-
-  print(py_utils.dict_of_dicts_as_table_str(sorted_all_table, None))
+  print(py_utils.dict_of_dicts_as_table_str(all_table, None, table_format="csv"))
+  print(py_utils.dict_of_dicts_as_table_str(all_table, None))
 
 
 
