@@ -11,7 +11,7 @@ import numpy as np
 
 class DatasetBuilder(Registrable):
 
-  def build(self, examples: List[GPVExample]) -> TorcDataset:
+  def build(self, examples: List[GPVExample], seed) -> TorcDataset:
     # Note this might be run on multiple processes, so it should be deterministic,
     raise NotImplementedError()
 
@@ -19,13 +19,10 @@ class DatasetBuilder(Registrable):
 @DatasetBuilder.register("partition-web-qa")
 class PartitionWebQa(DatasetBuilder):
 
-  def __init__(self, n_partitions: int, seed=None):
+  def __init__(self, n_partitions: int):
     self.n_partitions = n_partitions
-    if seed is None:
-      seed = np.random.randint(-2**26, 2**26)
-    self.seed = seed
 
-  def build(self, examples: List[GPVExample]) -> TorcDataset:
+  def build(self, examples: List[GPVExample], seed) -> TorcDataset:
     always_keep = []
     webqa = []
     for ex in examples:
@@ -37,9 +34,10 @@ class PartitionWebQa(DatasetBuilder):
       return always_keep
     keep = len(webqa) // self.n_partitions
     logging.info(f"Keeping {len(always_keep)} examples and sampling {keep} of {len(webqa)} from webqa")
-    return SubsetDataset(always_keep, webqa, self.n_partitions, self.seed)
+    return SubsetDataset(always_keep, webqa, self.n_partitions, seed)
 
 
+# TODO rename to `PartitionedSubsetDataset`
 class SubsetDataset(TorcDataset):
   def __init__(self, always_include: List, sample_partition: List,
                partitions: int, seed: int):
@@ -55,7 +53,7 @@ class SubsetDataset(TorcDataset):
     assert sum(partition_sizes) == len(sample_partition)
     self._bounds = np.cumsum([0] + partition_sizes)
 
-    self._on_partition = 0
+    self._on_partition = None
     self.size = len(sample_partition)
 
   def __len__(self):
@@ -70,7 +68,7 @@ class SubsetDataset(TorcDataset):
     return self.sample_partition[start + ix]
 
   def set_epoch(self, epoch):
-    if self._bounds is None or self._on_partition == self.n_partitions - 1:
+    if self._on_partition is None or self._on_partition == self.n_partitions - 1:
       rng = np.random.RandomState(self.seed + epoch*4523)
       self._on_partition = 0
       rng.shuffle(self.sample_partition)
