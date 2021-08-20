@@ -215,7 +215,8 @@ def table_string(table: List[List[str]]) -> str:
   return "\n".join(out)
 
 
-def dict_of_dicts_as_table_str(data: Dict[str, Dict[str, Any]], val_format, all_keys=None, top_right="_") -> str:
+def dict_of_dicts_as_table_str(data: Dict[str, Dict[str, Any]], val_format, all_keys=None,
+                               top_right="_", table_format="even-spaced") -> str:
   """Table of row->col->value to string"""
   if all_keys is None:
     all_keys = {}
@@ -230,10 +231,16 @@ def dict_of_dicts_as_table_str(data: Dict[str, Dict[str, Any]], val_format, all_
   for name, result in data.items():
     row = [name] + [val_to_str(result.get(x), val_format) for x in all_keys]
     table.append(row)
-  return table_string(table)
+  if table_format == "even-spaced":
+    return table_string(table)
+  elif table_format == "csv":
+    return "\n".join(",".join(row) for row in table)
+  else:
+    raise ValueError()
 
 
-def list_of_dicts_as_table_str(data: List[Dict[str, Any]], val_format, all_keys=None) -> str:
+def list_of_dicts_as_table_str(data: List[Dict[str, Any]], val_format,
+                               all_keys=None, table_format="even-spaced") -> str:
   """Table of row->col->value to string"""
   if all_keys is None:
     all_keys = {}
@@ -248,7 +255,13 @@ def list_of_dicts_as_table_str(data: List[Dict[str, Any]], val_format, all_keys=
   for result in data:
     row = [val_to_str(result.get(x), val_format) for x in all_keys]
     table.append(row)
-  return table_string(table)
+
+  if table_format == "even-spaced":
+    return table_string(table)
+  elif table_format == "csv":
+    return "\n".join(",".join(row) for row in table)
+  else:
+    raise ValueError()
 
 
 def nested_struct_to_flat(tensors, prefix=(), cur_dict=None) -> Dict[Tuple, torch.Tensor]:
