@@ -6,7 +6,9 @@ import os
 
 import h5py
 
-from exp.ours.boosting import SceUnseenCategories
+from exp.ours.boosting import SceUnseenCategories, OpenSceUnseenCategories
+from exp.ours.data.gpv import GpvDataset
+from exp.ours.data.opensce import OpenSceDataset
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -103,7 +105,12 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
   prediction_args = dict(beam_search_spec=bs)
 
   if args.boost_unseen:
-    prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
+    if isinstance(dataset, GpvDataset):
+      prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
+    elif isinstance(dataset, OpenSceUnseenCategories):
+      prediction_args["mask"] = OpenSceUnseenCategories(task, args.boost_unseen, args.boost_syn)
+    else:
+      raise NotImplementedError()
 
   if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
     logging.info("Using classification mask")
@@ -133,7 +140,11 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
       json.dump(config, f, indent=2)
 
   if args.eval:
-    logging.info("Evaluating...")
+    if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
+      logging.info("Skip evaluating since no labels OpenSce Captioning")
+      return
+    else:
+      logging.info("Evaluating...")
     evaluator, subsets = get_evaluator(dataset)
     results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
 
