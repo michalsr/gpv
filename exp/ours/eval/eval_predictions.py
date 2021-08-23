@@ -96,7 +96,8 @@ def cache_evaluation(prefix_or_dir, evaluator, stats):
 def get_evaluator(dataset):
   if isinstance(dataset, OpenSceDataset):
     if dataset.get_task() == Task.CAPTIONING:
-      raise ValueError("OpenSce caption eval not supported")
+      logging.warning("OpenSce caption eval not supported")
+      return None, None
     if dataset.get_task() in {Task.CLS, Task.CLS_IN_CONTEXT}:
       unseen = GpvDataset.UNSEEN_GROUPS[Task.CLS]
       seen = set(py_utils.flatten_list(SYNONYMS[x] for x in COCO_CATEGORIES if x not in unseen))
@@ -286,6 +287,8 @@ def main():
       logging.info(f"Loading data for {ds_name}")
       instances = dataset.load()
       evaluator, get_subsets = get_evaluator(dataset)
+      if evaluator is None:
+        continue
       cached_datasets[ds_name] = instances, evaluator, get_subsets
     else:
       instances, evaluator, get_subsets = cached_datasets[ds_name]
