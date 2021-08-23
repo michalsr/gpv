@@ -4,6 +4,7 @@ from numbers import Number
 import spacy
 import torch
 from allennlp.common import FromParams, Registrable
+from nltk import word_tokenize
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.cider.cider import Cider
 
@@ -26,6 +27,7 @@ import numpy as np
 
 from exp.ours.train.quiet_ptbtokenizer import QuitePTBTokenizer
 from utils.io import load_json_object
+from nltk.stem import WordNetLemmatizer
 
 
 def vqa_score(answer, ground_truth_answer_counts):
@@ -129,7 +131,7 @@ class VqaEvaluator(PerExampleEvaluator):
 @Evaluator.register("cls-evaluator")
 class ClsEvaluator(PerExampleEvaluator):
 
-  def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput]):
+  def evaluate_examples(self, examples: List[ClsExample], predictions: Dict[str, GPVExampleOutput]):
     out = []
     for example in examples:
       answer = predictions[example.gpv_id].text[0].lower()
@@ -179,6 +181,7 @@ class OpenSceClsEvaluator(PerExampleEvaluator):
 class OpenSceVqaEvaluator(PerExampleEvaluator):
 
   nlp = spacy.load('en_core_web_sm')
+  lemmatizer = WordNetLemmatizer()
 
   @staticmethod
   def answer_match_iou(cand_tokens: List[str], ref_tokens: List[str]) -> float:
@@ -187,12 +190,6 @@ class OpenSceVqaEvaluator(PerExampleEvaluator):
     intersection = len(cset.intersection(rset))
     union = len(cset.union(rset))
     return intersection / union
-
-  @staticmethod
-  def get_tokens(txt: str):
-    lemmas = [t.lemma_ for t in OpenSceVqaEvaluator.nlp(txt)]
-    articles = ['a','an','the']
-    return [l for l in lemmas if l not in articles]
 
   @staticmethod
   def answer_match(cand_tokens: List[str], ref_tokens: List[str]) -> bool:
@@ -207,8 +204,17 @@ class OpenSceVqaEvaluator(PerExampleEvaluator):
     return float(any(
       [OpenSceVqaEvaluator.answer_match(gt_tokens, OpenSceVqaEvaluator.get_tokens(ans)) for ans in pred_answers[:k]]))
 
-  def __init__(self, top_k: Optional[List[int]]=(5,)):
+  def __init__(self, top_k: Optional[List[int]]=(5,), spacy_lemmatizer=True):
     self.top_k = top_k
+    self.spacy_lemmatizer = spacy_lemmatizer
+
+  def get_tokens(self, txt: str):
+    if self.spacy_lemmatizer:
+      lemmas = [t.lemma_ for t in OpenSceVqaEvaluator.nlp(txt)]
+    else:
+      lemmas = [OpenSceVqaEvaluator.lemmatizer.lemmatize(x) for x in word_tokenize(txt)]
+    articles = ['a', 'an', 'the']
+    return [l for l in lemmas if l not in articles]
 
   def evaluate_examples(self, examples: List[VqaExample], predictions: Dict[str, GPVExampleOutput]):
     out = []
