@@ -8,6 +8,7 @@ from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
 from exp.ours.data.dataset import Task
 from exp.ours.data.gpv import GpvDataset, COCO_CATEGORIES
+from exp.ours.data.opensce import OpenSceCategories, OPENSCE_SYNONYMS
 from exp.ours.train.runner import PredictionArg
 from exp.ours.util import py_utils
 
@@ -63,6 +64,28 @@ class SceSeenCategories(MaskSpec):
     unseen = set(GpvDataset.UNSEEN_GROUPS[self.task])
     return [x for x in COCO_CATEGORIES if x in unseen]
 
+
+@dataclass
+@PredictionArg.register("opensce-unseen-categories")
+class OpenSceUnseenCategories(MaskSpec):
+  task: Task
+  val: float
+  syn: bool=False
+
+  def get_name(self):
+    return "sce_unseen"
+
+  def target_eos(self):
+    return False
+
+  def get_target_words(self):
+    cats = OpenSceCategories()
+    all_coco_seen = [x for x in COCO_CATEGORIES if x not in set(GpvDataset.UNSEEN_GROUPS[self.task])]
+    all_coco_seen = set(py_utils.flatten_list(SYNONYMS[x] for x in all_coco_seen))
+    cats = [x for x in cats if x not in all_coco_seen]
+    if self.syn:
+      cats = py_utils.flatten_list(OPENSCE_SYNONYMS[x] for x in cats)
+    return cats
 
 @dataclass
 @PredictionArg.register("sce-unseen-categories")
