@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from os.path import join, exists
 from typing import List
 
@@ -19,26 +20,40 @@ class WebQaAnswers(PredictionArg, list):
   def __init__(self, name, question_types="all"):
     self.name = name
     self.question_types = question_types
-    cache_file = join(file_paths.CACHE_DIR, f"webqa-{name}-answers.json")
-    if exists(cache_file):
-      answers = load_json_object(cache_file)
+
+    answer_set_file = join(file_paths.WEBQA_DIR, name, "answer_set.json")
+    if exists(answer_set_file):
+      answers = load_json_object(answer_set_file)
     else:
-      logging.info(f"Computing and caching webqa {name} answers")
-      examples = []
-      for part in ["train", "test", "val"]:
-        examples += WebQaDataset(name, part, question_types=self.question_types).load()
-      answers = sorted(set(x.target_answer for x in examples))
-      dump_json_object(answers, cache_file, indent=2)
+      cache_file = join(file_paths.CACHE_DIR, f"webqa-{name}-answers.json")
+      if exists(cache_file):
+        answers = load_json_object(cache_file)
+      else:
+        logging.info(f"Computing and caching webqa {name} answers")
+        examples = []
+        for part in ["train", "test", "val"]:
+          examples += WebQaDataset(name, part, question_types=self.question_types).load()
+        answers = sorted(set(x.target_answer for x in examples))
+        dump_json_object(answers, cache_file, indent=2)
     super().__init__(answers)
 
 
 @Dataset.register("webqa")
 class WebQaDataset(Dataset):
+  QUESTION_TYPE_GROUPS = {
+    "nouncls": {"noun_classification"},
+    "subset1": {"5n", "9m", "1v", "2v", "6v", "5v", "4v", "3v", "8v", "7v", "1a", "5a", "1n", "3n"},
+    "noun-all": {"1n", "3n", "5n", "7n"},
+    "basic": {"1n", "1a", "1v"},
+    "adj-all": set(f"{i}a" for i in range(1, 9)),
+    "verb-all": set(f"{i}v" for i in range(1, 8)),
+    "non-noun": set([f"{i}v" for i in range(1, 8)] + [f"{i}a" for i in range(1, 9)])
+  }
 
   def __init__(self, name, split: str, sample=None, question_types="all"):  # Other hyper-parameters can be added here
     if split not in {"test", "val", "train"}:
       raise ValueError(split)
-    if name not in {"80", "fifth", "all"}:
+    if name not in {"80", "fifth", "all", "all-v2"}:
       raise ValueError(name)
     self.sample = sample
     self.split = split
@@ -48,10 +63,7 @@ class WebQaDataset(Dataset):
   def get_name(self) -> str:
     name = f"webqa-{self.name}-{self.split}"
     if self.question_types != "all":
-      if self.question_types == "noun-cls":
-        name = "-nouncls"
-      else:
-        raise NotImplementedError()
+      name = f"-{self.question_types}"
     if self.sample is not None:
       name += f"-s{int_to_str(self.sample)}"
     return name
@@ -66,10 +78,12 @@ class WebQaDataset(Dataset):
 
   def load(self) -> List[GPVExample]:
     instances = load_webqa(self.name, self.split)
-    if self.question_types == "noun-cls":
-      instances = [x for x in instances if x.meta["question_type"] == "noun_classification"]
-    elif self.question_types != "all":
-      raise NotImplementedError()
+    if self.question_types != "all":
+      target_kinds = self.QUESTION_TYPE_GROUPS[self.question_types]
+      prev_len = len(instances)
+      instances = [x for x in instances if x.meta["question_type"] in target_kinds]
+      logging.info(f"Selected {len(instances)} if {prev_len} questions for qtype {self.question_types}")
+      assert len(instances) > 0
 
     if self.sample:
       instances.sort(key=lambda x: x.id)
@@ -88,6 +102,7 @@ def load_webqa(part, split):
   for x in raw_instances:
     q = GPVExample(
       f"web-{x['id']}", Task.WEBQA, x["image"]["image_id"],
-      query=x["query"], target_answer=x["answer"], meta=dict(question_type=x["question_type"]))
+      query=x["query"], target_answer=sys.intern(x["answer"]),
+      meta=dict(question_type=(x["question_type"])))
     out.append(q)
   return out
