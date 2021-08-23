@@ -41,21 +41,6 @@ import numpy as np
 
 
 @dataclass
-class TrainerDataset(FromParams):
-  """Dataset with meta-data that will be used during training"""
-
-  dataset: Dataset
-  logging_name: str = None
-  eval_sample: Optional[int] = None
-
-  def get_name(self):
-    if self.logging_name is None:
-      return self.dataset.get_name()
-    else:
-      return self.logging_name
-
-
-@dataclass
 class EvaluationSetup(FromParams):
   """Specifies how to evaluate a task"""
 
@@ -76,6 +61,22 @@ class EvaluationSetup(FromParams):
 
   evaluator: Evaluator
   prediction_args: Dict[str, Union[PredictionArg, int, float, str, None]]
+
+
+@dataclass
+class TrainerDataset(FromParams):
+  """Dataset with meta-data that will be used during training"""
+
+  dataset: Dataset
+  logging_name: str = None
+  eval_sample: Optional[int] = None
+  eval_setup: EvaluationSetup = None
+
+  def get_name(self):
+    if self.logging_name is None:
+      return self.dataset.get_name()
+    else:
+      return self.logging_name
 
 
 @dataclass
@@ -339,6 +340,8 @@ class Trainer(FromParams):
 
     total_eval = 0
     for examples, ds in to_eval:
+      if ds.eval_sample == 0:
+        continue
       # Slightly more efficient to group by query length
       prepped = [model.preprocess_example(x) for x in examples]
       do_sort = any(ex.sort_len is not None for ex in prepped)
@@ -348,7 +351,10 @@ class Trainer(FromParams):
         # Ensures order is consistent, needed in the distributed case
         prepped.sort(key=lambda ex: ex.id)
 
-      eval_spec = self.evaluation[ds.dataset.get_task()]
+      if ds.eval_setup is None:
+        eval_spec = self.evaluation[ds.dataset.get_task()]
+      else:
+        eval_spec = ds.eval_setup
 
       if is_distributed():
         sampler = DistributedSubsetSampler(
