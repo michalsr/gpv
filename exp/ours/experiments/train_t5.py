@@ -1,13 +1,16 @@
 import json
 import os
+from copy import deepcopy
 
 from transformers import AutoConfig
 
-from exp.ours.data.webqa import Web80QaDataset, WebQa80Answers
+from exp.ours.data.dataset_builder import PartitionWebQa
+from exp.ours.data.webqa import WebQaDataset, WebQaAnswers
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
 from exp.ours.models.model_utils import BackboneParameterExtractor
+from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
 
@@ -28,7 +31,7 @@ def main():
   parser.add_argument("--weight_decay", type=float, default=1e-4)
   parser.add_argument("--delay", type=float, default=0.0)
 
-  add_image_featurizer_args(parser, vfreeze="all", vmodel="detr_boxes")
+  add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
     clip_grad_norm=None, num_workers=4, batch_size=60)
@@ -89,21 +92,28 @@ def main():
     optimizer=optimizer, scheduler=scheduler
   )
 
-  # Add the WebQaDataset we want to experiment with
-  # trainer.train_datasets.append(TrainerDataset(
-  #   Web80QaDataset(100 if args.debug else None, "train"), "webqa-tr",
-  #   eval_sample=50 if args.debug else 3000
-  # ))
-  # trainer.eval_datasets.append(TrainerDataset(
-  #   Web80QaDataset(100 if args.debug else None, "val"), "webqa-val",
-  #   eval_sample=50 if args.debug else None
-  # ))
-  # trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
-  # trainer.evaluation[Task.WEBQA] = EvaluationSetup(
-  #   evaluator.WebQaEvaluator(),
-  #   dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=WebQa80Answers())
-  # )
+  webqa_name = "all-v2"
+  qtypes = "non-noun"
+  webqa_train = WebQaDataset(webqa_name, "train", 100 if args.debug else None, qtypes)
+  webqa_val = WebQaDataset(webqa_name, "val", 100 if args.debug else None, qtypes)
+  webqq_eval = EvaluationSetup(
+    evaluator.WebQaEvaluator(),
+    dict(beam_search_spec=BeamSearchSpec(1, 5),
+         answer_options=webqa_train.get_answer_options(False))
+  )
 
+  if webqa_train is not None:
+    # Add the WebQaDataset we want to experiment with
+    trainer.train_datasets.append(TrainerDataset(
+      webqa_train, "webqa-tr", eval_sample=50 if args.debug else 3000, eval_setup=webqq_eval))
+    trainer.eval_datasets.append(TrainerDataset(
+      webqa_val, "webqa-val", eval_sample=50 if args.debug else None, eval_setup=webqq_eval))
+    trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
+    trainer.train_dataset_builder = PartitionWebQa(8)
+
+  trainer.eval_loader = deepcopy(trainer.train_loader)
+  trainer.train_loader.persist_workers = False
+  trainer.eval_loader.persist_workers = False
   run_trainer_from_args(trainer, model, args)
 
 
