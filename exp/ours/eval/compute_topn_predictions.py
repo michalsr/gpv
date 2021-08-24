@@ -107,7 +107,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
   if args.boost_unseen:
     if isinstance(dataset, GpvDataset):
       prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
-    elif isinstance(dataset, OpenSceUnseenCategories):
+    elif isinstance(dataset, OpenSceDataset):
       prediction_args["mask"] = OpenSceUnseenCategories(task, args.boost_unseen, args.boost_syn)
     else:
       raise NotImplementedError()
