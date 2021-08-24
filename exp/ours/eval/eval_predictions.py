@@ -214,6 +214,7 @@ def main():
   parser.add_argument("--sample", type=int)
   parser.add_argument("--nocache", action="store_true")
   parser.add_argument("--per_run", action="store_true")
+  parser.add_argument("--hyperparameters", choices=["none", "webqa"], default="none")
   args = parser.parse_args()
   py_utils.add_stdout_logger()
 
@@ -346,6 +347,28 @@ def main():
   remapped_keys = sort_and_remap_keys(list(all_keys))
   for row_name, row in list(all_table.items()):
     all_table[row_name] = {name: row[key] for key, name in remapped_keys.items() if key in row}
+
+  if args.hyperparameters == "webqa":
+    model_name_to_model_dir = {k: v[0] for k, v in model_dirs.items()}
+    for model_name, row in all_table.items():
+      hyper = {}
+      key = "/".join(model_name.split("/")[:-1])
+      trainer_data = load_json_object(join(model_name_to_model_dir[key], "trainer.json"))
+
+      ds = trainer_data["train_datasets"][-1]["dataset"]
+      assert ds["type"] == "webqa"
+      hyper["version"] = "v1" if ds["name"] == "all" else "v2"
+      hyper["qtype"] = ds.get("question_types", "none")
+      builder = trainer_data["train_dataset_builder"]
+      if builder is None:
+        hyper["part"] = "1"
+      elif builder["type"] == "partition-web-qa":
+        hyper["part"] = builder["n_partitions"]
+      else:
+        raise NotImplementedError()
+      hyper.update(row)
+      all_table[model_name] = hyper
+
 
   print(py_utils.dict_of_dicts_as_table_str(all_table, None, table_format="csv"))
   print(py_utils.dict_of_dicts_as_table_str(all_table, None))
