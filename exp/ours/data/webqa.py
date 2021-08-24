@@ -42,7 +42,8 @@ class WebQaAnswers(PredictionArg, list):
 class WebQaDataset(Dataset):
   QUESTION_TYPE_GROUPS = {
     "nouncls": {"noun_classification"},
-    "subset1": {"5n", "9m", "1v", "2v", "6v", "5v", "4v", "3v", "8v", "7v", "1a", "5a", "1n", "3n"},
+    "subset1": {"5n", "1v", "2v", "6v", "5v", "4v", "3v", "8v", "7v", "1a", "5a", "1n", "3n"},
+    "n1": {"1n"},
     "noun-all": {"1n", "3n", "5n", "7n"},
     "basic": {"1n", "1a", "1v"},
     "adj-all": set(f"{i}a" for i in range(1, 9)),
