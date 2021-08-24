@@ -4,32 +4,40 @@ from collections import Counter
 from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler
 import numpy as np
 
+from exp.ours.util import py_utils
+
 
 class TestStratifiedSubsetSampler(unittest.TestCase):
 
+  def _get_samples(self, group_size, seed, stratify, batch_size, epoch):
+    sampler = StratifiedSubsetSampler(group_size, seed=seed, stratify=stratify, batch_size=batch_size)
+    sampler.set_epoch(epoch)
+    if batch_size is None:
+      return list(sampler)
+    else:
+      batches = list(sampler)
+      self.assertTrue(all(len(x) <= batch_size for x in batches))
+      return py_utils.flatten_list(batches)
+
   def test_basic(self):
-    for group_size in [[20], [20, 10], [50, 60, 30]]:
-      for stratify in [True, False]:
-        seed = np.random.randint(0, 10000)
-        sampler = StratifiedSubsetSampler(group_size, seed=seed, stratify=stratify)
-        sampler.set_epoch(0)
-        samples0 = list(sampler)
-        self.assertEqual(set(samples0), set(range(sum(group_size))))
+    for batch in [None, 7]:
+      for group_size in [[20], [20, 10], [50, 60, 30]]:
+        for stratify in [True, False]:
+          seed = np.random.randint(0, 10000)
+          samples0 = self._get_samples(group_size, seed, stratify, batch, 0)
+          self.assertEqual(set(samples0), set(range(sum(group_size))))
 
-        # Should be repeatable
-        sampler = StratifiedSubsetSampler(group_size, seed=seed, stratify=stratify)
-        sampler.set_epoch(0)
-        samples = list(sampler)
-        self.assertEqual(samples, samples0)
+          # Should be repeatable
+          samples = self._get_samples(group_size, seed, stratify, batch, 0)
+          self.assertEqual(samples, samples0)
 
-        # Should be different with different seed
-        sampler = StratifiedSubsetSampler(group_size, seed=seed+1, stratify=stratify)
-        self.assertNotEqual(samples0, list(sampler))
+          # Should be different with different seed
+          samples = self._get_samples(group_size, seed+1, stratify, batch, 0)
+          self.assertNotEqual(samples0, samples)
 
-        # And with different epochs
-        sampler.set_epoch(1)
-        sampler = StratifiedSubsetSampler(group_size, seed=seed+1, stratify=stratify)
-        self.assertNotEqual(samples0, list(sampler))
+          # And with different epochs
+          samples = self._get_samples(group_size, seed, stratify, batch, np.random.randint(1, 1000))
+          self.assertNotEqual(samples0, list(samples))
 
   def test_sample_counts(self):
     sampler = StratifiedSubsetSampler(
@@ -55,7 +63,7 @@ class TestStratifiedSubsetSampler(unittest.TestCase):
       self.assertEqual(len(epoch1), 10)
       self.assertEqual(set(epoch0 + epoch1), set(range(20)))
 
-  def test_cycle_offset(self):
+  def test_no_repetas(self):
     for n, n_epochs in [(2, 10), (8, 3), (14, 2)]:
       sampler = StratifiedSubsetSampler(
         [29], samples_per_epoch=[n], seed=1, stratify=True)
@@ -89,23 +97,28 @@ class TestStratifiedSubsetSampler(unittest.TestCase):
 
   def test_distributed(self):
     word_size = 4
-    sizes = [17, 13, 27, 5]
+    sizes = [17, 13, 27, 37]
     samples = [4, 10, 20, None]
+    batch_size = 3
     for epoch in [0, 12]:
-      distributed_samples = []
+      distributed_batches = []
       for rank in range(word_size):
         sampler = StratifiedSubsetSampler(
           sizes, samples_per_epoch=samples, seed=9213, stratify=True,
-          rank=rank, world_size=word_size)
+          rank=rank, world_size=word_size, batch_size=batch_size)
         sampler.set_epoch(epoch)
-        distributed_samples += list(sampler)
+        distributed_batches.append(list(sampler))
+        self.assertEqual(len(sampler), len(distributed_batches[-1]))
+
+      self.assertTrue(all(len(distributed_batches[0]) == len(x) for x in distributed_batches[1:]))
+      all_distributed = py_utils.flatten_list(py_utils.flatten_list(distributed_batches))
 
       sampler = StratifiedSubsetSampler(
         sizes, samples_per_epoch=samples, seed=9213, stratify=True)
       sampler.set_epoch(epoch)
-      self.assertEqual(set(distributed_samples), set(sampler))
+      self.assertEqual(set(all_distributed), set(sampler))
 
 
 if __name__ == '__main__':
-  # TestStratifiedSubsetSampler().test_distributed()
-  unittest.main()
+  TestStratifiedSubsetSampler().test_distributed()
+  # unittest.main()

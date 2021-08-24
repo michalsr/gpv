@@ -409,18 +409,18 @@ class Trainer(FromParams):
     for grp in training_examples:
       all_train.append(py_utils.flatten_list(model.preprocess_example_train(x) for x in grp))
     all_train_sizes = [len(x) for x in all_train]
-    all_train_flat = py_utils.flatten_list(all_train)
+    all_train = py_utils.flatten_list(all_train)
 
-    if len(set(x.id for x in all_train_flat)) != len(all_train_flat):
+    if len(set(x.id for x in all_train)) != len(all_train):
       raise ValueError("Repeated IDs in train")
 
     shuffle = True
-    all_train = all_train_flat
 
     batch_size = self.train_loader.batch_size
 
     if (any(x.train_sample is not None for x in self.train_datasets) or
         self.stratify or is_distributed()):
+      # Use our custom sampler that handles all these cases
       if is_distributed():
         world_size, rank = dist.get_world_size(), dist.get_rank()
         if batch_size % world_size != 0:
@@ -430,11 +430,14 @@ class Trainer(FromParams):
                      f"are {world_size} workers with base size of {self.train_loader.batch_size}")
       else:
         world_size, rank = None, None
+
       samples = [x.train_sample for x in self.train_datasets]
       sampler = StratifiedSubsetSampler(
-        all_train_sizes, runtime.seed, self.stratify, samples, rank, world_size)
-      shuffle = False   # Using a sampler
+        all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
+      shuffle = False   # Sampler does shuffling
+      loader_batch_size = 1  # Sampler does batching
     else:
+      loader_batch_size = batch_size
       sampler = None
 
     batch_groups = runtime.grad_accumulation
@@ -447,7 +450,7 @@ class Trainer(FromParams):
 
     loader = self.train_loader.build(
       all_train, model.get_collate(True),
-      batch_size=batch_size, shuffle=shuffle, sampler=sampler)
+      batch_size=loader_batch_size, shuffle=shuffle, batch_sampler=sampler)
 
     if batch_groups == 1:
       return loader, len(loader), sampler
