@@ -365,7 +365,7 @@ class T5GPV(GPVModel):
       tensor_mask = np.zeros([voc_len], dtype=np.bool)
       for word in words:
         tensor_mask[encode_with_cache(word, self.tokenizer, self.tokenizer_cache)] = True
-      for word in ID_TO_COCO_CATEGORY.values():
+      for word in COCO_CATEGORIES:
         if word not in words:
           tensor_mask[encode_with_cache(word, self.tokenizer, self.tokenizer_cache)] = False
       tensor_mask[self.tokenizer.eos_token_id] = mask.target_eos()

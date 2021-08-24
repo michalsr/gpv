@@ -4,7 +4,6 @@ from copy import deepcopy
 
 from transformers import AutoConfig
 
-from exp.ours.data.dataset_builder import PartitionWebQa
 from exp.ours.data.webqa import WebQaDataset, WebQaAnswers
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
@@ -26,6 +25,7 @@ def main():
   parser = ArgumentParser()
   parser.add_argument("--model", choices=["t5-small", "t5-base", "t5-large"], default=None)
   parser.add_argument("--lr", type=float, default=3e-4)
+  parser.add_argument("--webqa_sample", type=float, default=1.0)
   parser.add_argument("--vlr", type=float)
   parser.add_argument("--vwarmup", type=float, default=0.1)
   parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -93,8 +93,10 @@ def main():
   )
 
   webqa_name = "all-v2"
-  qtypes = "non-noun"
-  webqa_train = WebQaDataset(webqa_name, "train", 100 if args.debug else None, qtypes)
+  qtypes = "basic"
+  # Set the val set for debugging since loading the train set is slow
+  webqa_train = WebQaDataset(webqa_name, "val" if args.debug else "train",
+                             100 if args.debug else None, qtypes)
   webqa_val = WebQaDataset(webqa_name, "val", 100 if args.debug else None, qtypes)
   webqq_eval = EvaluationSetup(
     evaluator.WebQaEvaluator(),
@@ -105,13 +107,18 @@ def main():
   if webqa_train is not None:
     # Add the WebQaDataset we want to experiment with
     trainer.train_datasets.append(TrainerDataset(
-      webqa_train, "webqa-tr", eval_sample=50 if args.debug else 3000, eval_setup=webqq_eval))
+      webqa_train, "webqa-tr",
+      train_sample=args.webqa_sample,
+      eval_sample=50 if args.debug else 3000, eval_setup=webqq_eval
+    ))
     trainer.eval_datasets.append(TrainerDataset(
       webqa_val, "webqa-val", eval_sample=50 if args.debug else None, eval_setup=webqq_eval))
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
-    trainer.train_dataset_builder = PartitionWebQa(8)
 
+  trainer.stratify = True
   trainer.eval_loader = deepcopy(trainer.train_loader)
+
+  # This might save memory?
   trainer.train_loader.persist_workers = False
   trainer.eval_loader.persist_workers = False
   run_trainer_from_args(trainer, model, args)
