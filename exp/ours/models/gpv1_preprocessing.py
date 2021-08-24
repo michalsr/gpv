@@ -174,11 +174,11 @@ class Gpv1Preprocessor(FromParams):
     elif isinstance(example, GPVExample):
       # Currently assume the query and answer are just text
       assert isinstance(example.query, str)
-      assert isinstance(example.target_answer, str)
+      assert example.target_answer is None or isinstance(example.target_answer, str)
       out = [replace(
         example,
         query=[self.preprocess_text(example.query)],
-        target_answer=self.preprocess_text(example.target_answer),
+        target_answer=None if example.target_answer is None else self.preprocess_text(example.target_answer),
         meta=None if include_meta else example.meta
       )]
     elif isinstance(example, ClsExample):
