@@ -247,13 +247,15 @@ class DataLoaderBuilder(FromParams):
   prefetch_factor: int = 2
   persist_workers: bool = False
 
-  def build(self, dataset, collate, sampler=None, shuffle=False, batch_size=None):
+  def build(self, dataset, collate, sampler=None, shuffle=False,
+            batch_size=None, batch_sampler=None):
     return DataLoader(
       dataset,
       batch_size=batch_size if batch_size is not None else self.batch_size,
       collate_fn=collate,
       num_workers=self.num_workers,
       shuffle=shuffle,
+      batch_sampler=batch_sampler,
       sampler=sampler,
       pin_memory=self.pin_memory,
       prefetch_factor=self.prefetch_factor,
