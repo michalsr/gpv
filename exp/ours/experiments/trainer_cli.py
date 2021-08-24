@@ -207,7 +207,6 @@ def get_trainer_from_args(
     clip_grad_norm=args.clip_grad_norm,
     tb_log_intervals=20,
     clip_grad_norm_re=vision_regex,
-    sort_train=False,
     checkpoint=True,
     sync_monitor=sync_monitor,
     eval_at_start=args.eval_start,

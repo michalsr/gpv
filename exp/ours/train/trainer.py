@@ -25,7 +25,7 @@ from tqdm import tqdm
 from torch import distributed as dist
 
 from exp.ours import file_paths
-from exp.ours.data.dataset_builder import DatasetBuilder
+from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset, Task
 from exp.ours.models.model import GPVModel
@@ -70,6 +70,7 @@ class TrainerDataset(FromParams):
   dataset: Dataset
   logging_name: str = None
   eval_sample: Optional[int] = None
+  train_sample: Union[int, float, None] = None
   eval_setup: EvaluationSetup = None
 
   def get_name(self):
@@ -220,8 +221,9 @@ class Trainer(FromParams):
   # Data iterator parameters
   train_loader: DataLoaderBuilder = None
   eval_loader: DataLoaderBuilder = None
-  train_dataset_builder: DatasetBuilder=None
-  sort_train: bool = False
+
+  # Should we balance the different train dataset between batches
+  stratify: bool = False
 
   # Saving
   save_evaluation_results: bool = True
@@ -252,6 +254,9 @@ class Trainer(FromParams):
       constructor_to_inspect = None,
       **extras
   ):
+    if "sort_train" in params:
+      # No longer supported
+      assert not params.pop("sort_train")
     out: Trainer = super().from_params(params)
 
     # Default from params does not do str -> class
@@ -400,40 +405,36 @@ class Trainer(FromParams):
 
   def _get_train_loader(self, model: GPVModel, training_examples: List[List],
                         runtime: RunArgs):
-    all_train = py_utils.flatten_list(training_examples)
-    all_train = py_utils.flatten_list(model.preprocess_example_train(x) for x in all_train)
+    all_train = []
+    for grp in training_examples:
+      all_train.append(py_utils.flatten_list(model.preprocess_example_train(x) for x in grp))
+    all_train_sizes = [len(x) for x in all_train]
+    all_train_flat = py_utils.flatten_list(all_train)
 
-    if len(set(x.id for x in all_train)) != len(all_train):
-      c = Counter(x.id for x in all_train)
-      print([k for k, v in c.items() if v > 1])
+    if len(set(x.id for x in all_train_flat)) != len(all_train_flat):
       raise ValueError("Repeated IDs in train")
-    # Ensure order is consistent between processes/training runs
-    all_train.sort(key=lambda ex: ex.id)
 
-    if self.train_dataset_builder is not None:
-      all_train = self.train_dataset_builder.build(all_train, runtime.seed)
-      # Do this here since the length might not be valid until after set_epoch
-      if hasattr(all_train, "set_epoch"):
-        all_train.set_epoch(0)
-        if self.train_loader.persist_workers:
-          # Persistent workers have a good chance of breaking things if
-          # the dataset is changing itself each epoch from `set_epoch`
-          # TODO maybe we should just re-build the data loader in that case
-          raise ValueError()
+    shuffle = True
+    all_train = all_train_flat
 
     batch_size = self.train_loader.batch_size
 
-    if is_distributed():
-      world_size = dist.get_world_size()
-      shuffle = False
-      sampler = DistributedSampler(all_train, world_size, dist.get_rank(), seed=runtime.seed)
-      if batch_size % world_size != 0:
-        raise ValueError("Batch size not divisible by world size")
-      batch_size = batch_size // world_size
-      logging.info(f"Using batch size {batch_size} since there "
-                   f"are {world_size} workers with base size of {self.train_loader.batch_size}")
+    if (any(x.train_sample is not None for x in self.train_datasets) or
+        self.stratify or is_distributed()):
+      if is_distributed():
+        world_size, rank = dist.get_world_size(), dist.get_rank()
+        if batch_size % world_size != 0:
+          raise ValueError("Batch size not divisible by world size")
+        batch_size = batch_size // world_size
+        logging.info(f"Using batch size {batch_size} since there "
+                     f"are {world_size} workers with base size of {self.train_loader.batch_size}")
+      else:
+        world_size, rank = None, None
+      samples = [x.train_sample for x in self.train_datasets]
+      sampler = StratifiedSubsetSampler(
+        all_train_sizes, runtime.seed, self.stratify, samples, rank, world_size)
+      shuffle = False   # Using a sampler
     else:
-      shuffle = True
       sampler = None
 
     batch_groups = runtime.grad_accumulation
@@ -446,8 +447,7 @@ class Trainer(FromParams):
 
     loader = self.train_loader.build(
       all_train, model.get_collate(True),
-      batch_size=batch_size, shuffle=shuffle, sampler=sampler
-    )
+      batch_size=batch_size, shuffle=shuffle, sampler=sampler)
 
     if batch_groups == 1:
       return loader, len(loader), sampler
@@ -903,14 +903,10 @@ class Trainer(FromParams):
     logging.info(f"Have {n_train} params and {n_freeze} frozen parameters")
 
     for epoch in range(train_state.epoch, self.epochs):
-      if epoch > 0 and  hasattr(train_loader.dataset, "set_epoch"):
-        train_loader.dataset.set_epoch(epoch)
-        n_train_batches = len(train_loader)
-
       ep_start = perf_counter()
       model.train()
 
-      if is_distributed():
+      if hasattr(tr_sampler, "set_epoch"):
         tr_sampler.set_epoch(epoch)
 
       if is_primary():
