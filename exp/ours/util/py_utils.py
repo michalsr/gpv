@@ -404,3 +404,32 @@ class MarkIfNotDefault(Action):
     assert not hasattr(namespace, f"{self.dest}_is_default")
     setattr(namespace, f"{self.dest}_not_default", True)
 
+
+def balanced_merge_multi(lsts: Iterable[List]) -> List:
+  """Merge lists while trying to keep them represented proportional to their lengths
+  in any continuous subset of the output list
+  """
+
+  lens = np.array([len(x) for x in lsts], dtype=np.float64)
+  target_ratios = lens / lens.sum()
+  current_counts = np.zeros(len(lsts), dtype=np.int32)
+  out = []
+  lsts = [list(x) for x in lsts]
+  while True:
+    if len(out) == 0:
+      next_i = np.argmax(target_ratios)
+    else:
+      # keep a track of the current mixing ratio, and add in the most under-repersnted list
+      # each step
+      next_i = np.argmin(current_counts / len(out) - target_ratios)
+    current_counts[next_i] += 1
+    lst = lsts[next_i]
+    out.append(lst.pop())
+    if len(lst) == 0:
+      target_ratios = np.delete(target_ratios, next_i)
+      current_counts = np.delete(current_counts, next_i)
+      lsts = lsts[:next_i] + lsts[next_i+1:]
+      if len(lsts) == 0:
+        break
+
+  return out[::-1]

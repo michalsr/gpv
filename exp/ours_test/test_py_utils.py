@@ -8,6 +8,26 @@ from exp.ours.util.py_utils import ReplaceAll
 
 class TestPyUtils(unittest.TestCase):
 
+  def test_balanced_merge_same_lens(self):
+    out = py_utils.balanced_merge_multi([
+      list(range(0, 3)),
+      list(range(3, 6)),
+      list(range(6, 9))
+    ])
+    self.assertEqual(set(out[:3]), {0, 3, 6})
+    self.assertEqual(set(out[3:6]), {1, 4, 7})
+    self.assertEqual(set(out[6:9]), {2, 5, 8})
+
+  def test_balanced_merge_different_lens(self):
+    out = py_utils.balanced_merge_multi([
+      list(range(0, 6)),
+      list(range(30, 33)),
+      list(range(100, 118))
+    ])
+    self.assertEqual(set(out[:9]), {0, 1, 30} | set(range(100, 106)))
+    self.assertEqual(set(out[9:18]), {2, 3, 31} | set(range(106, 112)))
+    self.assertEqual(set(out[18:]), {4, 5, 32} | set(range(112, 118)))
+
   def test_replace_all(self):
     rall = ReplaceAll({"cat": "c", "dog": "d", "cats": "cs"})
     self.assertEqual(rall.replace(""), "")
@@ -47,4 +67,5 @@ class TestPyUtils(unittest.TestCase):
 
 
 if __name__ == '__main__':
-  TestPyUtils().test_replace_all_rescape()
+  unittest.main()
+  # TestPyUtils().run()
