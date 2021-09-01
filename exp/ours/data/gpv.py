@@ -53,13 +53,19 @@ def load_gpv_boxes(split, gpv_split) -> List[LocalizationExample]:
   raw_instances = load_instances("detection", split, gpv_split)
   out = []
   for x in raw_instances:
-    cats = x["coco_categories"]
-    meta = {
-      "gpv1-seen": cats["seen"],
-      "gpv1-query": x["query"],
-      "gpv1-unseen": cats["unseen"],
-      "gpv1-id": x["id"]
-    }
+    if "coco_categories" in x:
+      cats = x["coco_categories"]
+      meta = {
+        "gpv1-seen": cats["seen"],
+        "gpv1-unseen": cats["unseen"],
+        "gpv1-query": x["query"],
+        "gpv1-id": x["id"]
+      }
+    else:
+      meta = {
+        "gpv1-query": x["query"],
+        "gpv1-id": x["id"]
+      }
     image_id = x["image"]["image_id"]
     cat_id = x["category_id"]
     gpv_id = f"coco-boxes{image_id}-cat{cat_id}"
@@ -77,12 +83,19 @@ def load_gpv_vqa(split, gpv_split) -> List[VqaExample]:
   out = []
   for x in raw_instances:
     cats = x.get("coco_categories")
-    meta = {"gpv1-answer": x["answer"]}
+    if "answer" in x:
+      meta = {"gpv1-answer": x["answer"]}
+    else:
+      meta = {}
     if cats is not None:
       meta.update({"gpv1-seen": cats["seen"], "gpv1-unseen": cats["unseen"], })
+    if "all_answers" in x:
+      answers = Counter(x["all_answers"])
+    else:
+      answers = None
     q = VqaExample(
       f"vqa{x['question_id']}", x["image"]["image_id"], x["query"],
-      Counter(x["all_answers"]), meta=meta)
+      answers, meta=meta)
     out.append(q)
   return out
 
@@ -92,15 +105,24 @@ def load_gpv_captioning(split, gpv_split) -> List[CaptioningExample]:
 
   raw_instances = load_instances("cap", split, gpv_split)
   grouped_by_image = defaultdict(list)
-  for x in raw_instances:
-    cats = x["coco_categories"]
-    meta = {
-      "gpv1-unseen": cats["unseen"],
-      "gpv1-seen": cats["seen"],
-      "gpv1-answer": x["answer"],
-      "gpv1-query": x["query"]
-    }
-    q = Caption(f"coco-cap{x['cap_id']}", x["answer"], meta)
+  for i, x in enumerate(raw_instances):
+    meta = {}
+    if "coco_categories" in x:
+      cats = x["coco_categories"]
+      meta.update({
+        "gpv1-unseen": cats["unseen"],
+        "gpv1-seen": cats["seen"],
+      })
+    if "answer" in x:
+      meta["gpv1-answer"] = x["answer"]
+    meta["gpv1-query"] = x["query"]
+    if "cap_id" not in x:
+      assert not gpv_split
+      assert split == "test"
+      cap_id = f"coco-cap-test{i}"
+    else:
+      cap_id = x["cap_id"]
+    q = Caption(f"coco-cap{cap_id}", x.get("answer"), meta)
     grouped_by_image[x["image"]["image_id"]].append(q)
 
   out = []
