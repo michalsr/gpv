@@ -31,7 +31,7 @@ class StratifiedSubsetSampler(Sampler):
   ):
     if world_size is None and batch_size is not None:
       logging.warning("Setting world size without batch size can results in"
-                      " distributed samplers ave different lengths")
+                      " distributed samplers with different lengths")
     self.group_sizes = group_sizes
     if samples_per_epoch is None:
       samples_per_epoch = [None for _ in group_sizes]
@@ -58,9 +58,9 @@ class StratifiedSubsetSampler(Sampler):
         self._size_per_epoch.append(val)
 
     proportions = np.array(self._size_per_epoch)
-    proportions = proportions/len(proportions)
-    proportions_str = ", ".join("%.3f" % x for x in proportions)
-    logging.info(f"Epoch proportions: {', '.join(proportions_str)}")
+    proportions = proportions/sum(proportions)
+    proportions_str = ", ".join(("%.3f" % x) for x in proportions)
+    logging.info(f"Epoch proportions: {proportions_str}")
     total_examples = sum(self._size_per_epoch)
     if world_size is not None:
       self.bounds = get_batch_bounds(total_examples, self.world_size)
