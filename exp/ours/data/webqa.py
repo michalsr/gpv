@@ -1,11 +1,15 @@
 import json
 import logging
 import sys
+from collections import Counter, defaultdict
 from os.path import join, exists
-from typing import List
+from typing import List, Union, Optional, Dict, Any
+
+from dataclasses import dataclass
 
 from exp.ours import file_paths
-from exp.ours.data.dataset import Dataset, Task
+from exp.ours.boosting import MaskSpec
+from exp.ours.data.dataset import Dataset, Task, ClsExample
 from exp.ours.data.gpv import load_instances
 from exp.ours.data.gpv_example import GPVExample
 import numpy as np
@@ -36,6 +40,51 @@ class WebQaAnswers(PredictionArg, list):
         answers = sorted(set(x.target_answer for x in examples))
         dump_json_object(answers, cache_file, indent=2)
     super().__init__(answers)
+
+
+@PredictionArg.register("webqa-answer-boost")
+class WebQaAnswersBoost(MaskSpec):
+
+  def __init__(self, val: float, question_types="all"):
+    self.val = val
+    self.question_types = question_types
+    self.data = WebQaAnswers("all-v2", question_types)
+
+  def get_target_words(self):
+    return self.data
+
+  def target_eos(self):
+    return False
+
+
+def get_webqa_answers_kinds():
+  cache_file = join(file_paths.CACHE_DIR, f"webqa-answers-types.json")
+  if exists(cache_file):
+    return load_json_object(cache_file)
+  else:
+    logging.info("Computing webqa answer types...")
+    data = WebQaDataset("all", "train").load()
+    kind_answers = defaultdict(Counter)
+    for ex in data:
+      kind_answers[ex.meta["question_type"][0]][ex.target_answer] += 1
+
+    kind_answers = {k: dict(v) for k, v in kind_answers.items()}
+    dump_json_object(kind_answers, cache_file, indent=2)
+    return kind_answers
+
+
+@dataclass
+class WebQaExample:
+  gpv_id: str
+  task: Task
+  image_id: Union[int, str]
+  query: str
+  answer: str
+  question_type: str
+  meta: Optional[Dict[str, Any]] = None
+
+  def get_gpv_id(self):
+    return self.gpv_id
 
 
 @Dataset.register("webqa")
@@ -77,17 +126,17 @@ class WebQaDataset(Dataset):
   def get_task(self) -> Task:
     return Task.CLS
 
-  def load(self) -> List[GPVExample]:
+  def load(self) -> List[WebQaExample]:
     instances = load_webqa(self.name, self.split)
     if self.question_types != "all":
       target_kinds = self.QUESTION_TYPE_GROUPS[self.question_types]
       prev_len = len(instances)
-      instances = [x for x in instances if x.meta["question_type"] in target_kinds]
+      instances = [x for x in instances if x.question_type in target_kinds]
       logging.info(f"Selected {len(instances)} if {prev_len} questions for qtype {self.question_types}")
       assert len(instances) > 0
 
     if self.sample:
-      instances.sort(key=lambda x: x.id)
+      instances.sort(key=lambda x: x.gpv_id)
       np.random.RandomState(613423).shuffle(instances)
       return instances[:self.sample]
     else:
@@ -101,9 +150,10 @@ def load_webqa(part, split):
   raw_instances = load_json_object(file)
   out = []
   for x in raw_instances:
-    q = GPVExample(
+    q = WebQaExample(
       f"web-{x['id']}", Task.WEBQA, x["image"]["image_id"],
-      query=x["query"], target_answer=sys.intern(x["answer"]),
-      meta=dict(question_type=(x["question_type"])))
+      x["query"],
+      sys.intern(x["answer"]), x["question_type"]
+    )
     out.append(q)
   return out

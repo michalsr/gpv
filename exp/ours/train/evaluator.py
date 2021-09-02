@@ -15,6 +15,7 @@ from exp.ours.data.gpv_example import GPVExample
 
 from exp.ours.data.dataset import VqaExample, CaptioningExample, ClsExample, LocalizationExample
 from exp.ours.data.opensce import OPENSCE_SYNONYMS
+from exp.ours.data.webqa import WebQaExample
 from exp.ours.util.image_utils import get_image_size
 from exp.ours.train.runner import GPVExampleOutput
 
@@ -103,7 +104,6 @@ class PerExampleEvaluator(Evaluator):
           subsets[subset].append(example_id)
 
     out = {}
-
     for metric_name, score in per_metric_scores.items():
       score = np.array(score)
       for subset_name, ixs in subsets.items():
@@ -142,11 +142,11 @@ class ClsEvaluator(PerExampleEvaluator):
 
 @Evaluator.register("webqa-evaluator")
 class WebQaEvaluator(PerExampleEvaluator):
-  def evaluate_examples(self, examples: List[GPVExample], predictions: Dict[str, GPVExampleOutput]):
+  def evaluate_examples(self, examples: List[WebQaExample], predictions: Dict[str, GPVExampleOutput]):
     out = []
     for example in examples:
       answer = predictions[example.get_gpv_id()].text[0].lower()
-      gt_answer = SYNONYMS[example.target_answer] if example.target_answer in SYNONYMS else [example.target_answer]
+      gt_answer = SYNONYMS[example.answer] if example.answer in SYNONYMS else [example.answer]
       out.append(dict(accuracy=answer in gt_answer))
     return out
 
@@ -215,6 +215,11 @@ class OpenSceVqaEvaluator(PerExampleEvaluator):
       lemmas = [OpenSceVqaEvaluator.lemmatizer.lemmatize(x) for x in word_tokenize(txt)]
     articles = ['a', 'an', 'the']
     return [l for l in lemmas if l not in articles]
+
+  def evaluate_example(self, example: VqaExample, pred: str):
+    answer = self.get_tokens(pred.lower())
+    gt = self.get_tokens(example.answers.lower())
+    return OpenSceVqaEvaluator.answer_match_iou(gt, answer)
 
   def evaluate_examples(self, examples: List[VqaExample], predictions: Dict[str, GPVExampleOutput]):
     out = []

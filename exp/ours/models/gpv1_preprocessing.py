@@ -1,9 +1,12 @@
+from allennlp.common import Params
 from dataclasses import replace
 
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import *
 import torchvision.transforms as T
 import numpy as np
+
+from exp.ours.data.webqa import WebQaExample
 
 NORMALIZE_TRANSFORM = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
@@ -104,7 +107,18 @@ CLS_QUERIES = [
 
 class Gpv1Preprocessor(FromParams):
 
-  def __init__(self):
+  @classmethod
+  def from_params(
+        cls,
+        params: Params,
+        **kwargs,
+    ) -> T:
+      if "webqa_cls_queries" not in params:
+        params["webqa_cls_queries"] = False
+      return super().from_params(**kwargs)
+
+  def __init__(self, webqa_cls_queries=True):
+    self.webqa_cls_queries = webqa_cls_queries
     self.preprocess_text = None
     self.cls_queries_tok = None
     self.caption_queries_tok = None
@@ -168,8 +182,18 @@ class Gpv1Preprocessor(FromParams):
         example.image_id,
         [self.preprocess_text(example.question)],
         query_boxes=all_image_box,
-        target_answer=self.preprocess_text(answer),
+        target_answer=None if answer is None else self.preprocess_text(answer),
         meta=example.meta if include_meta else None
+      )]
+    elif isinstance(example, WebQaExample):
+      if self.webqa_cls_queries and example.question_type == "1n":
+        query = self.cls_queries_tok
+      else:
+        query = [self.preprocess_text(example.query)]
+      out = [GPVExample(
+        example.gpv_id, example.task, example.image_id,
+        query,
+        target_answer=None if example.answer is None else self.preprocess_text(example.answer),
       )]
     elif isinstance(example, GPVExample):
       # Currently assume the query and answer are just text
