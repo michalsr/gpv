@@ -13,7 +13,7 @@ class StratifiedSubsetSampler(Sampler):
   """Sampler that supports stratifying different groups, distributed training, and
   showing subsets of each group each epoch in cyclic manner, so that the overlap between
   the subsets shown during multiple epochs is minimal. Also supports being used as
-  a batch samlpler through the `batch_size` parameter, which needs be set in the
+  a batch samlpler through the `batch_size` parameter, which needs to be set in the
   distributed setting to ensure each distributed sampler is the same length
 
   Requires `set_epoch` to be called before each epoch, always returns shuffled ids.
@@ -29,7 +29,7 @@ class StratifiedSubsetSampler(Sampler):
       rank=None,
       world_size=None
   ):
-    if world_size is None and batch_size is not None:
+    if world_size is not None and batch_size is None:
       logging.warning("Setting world size without batch size can results in"
                       " distributed samplers with different lengths")
     self.group_sizes = group_sizes

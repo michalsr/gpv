@@ -113,6 +113,7 @@ class TestStratifiedSubsetSampler(unittest.TestCase):
       self.assertTrue(all(len(distributed_batches[0]) == len(x) for x in distributed_batches[1:]))
       all_distributed = py_utils.flatten_list(py_utils.flatten_list(distributed_batches))
 
+      # Should match the non-distributed sampler
       sampler = StratifiedSubsetSampler(
         sizes, samples_per_epoch=samples, seed=9213, stratify=True)
       sampler.set_epoch(epoch)
@@ -120,5 +121,4 @@ class TestStratifiedSubsetSampler(unittest.TestCase):
 
 
 if __name__ == '__main__':
-  TestStratifiedSubsetSampler().test_distributed()
-  # unittest.main()
+  unittest.main()
