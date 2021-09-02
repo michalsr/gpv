@@ -13,13 +13,6 @@ from utils.io import load_json_object
 import numpy as np
 
 
-@PredictionArg.register("webqa-list")
-class WebQa80Answers(PredictionArg, list):
-  def __init__(self):
-    with open(file_paths.WEBQA80_ANSWERS) as f:
-      super().__init__(json.load(f))
-
-
 OPENSCE_SYNONYMS = {k: set(v) for k, v in load_json_object(file_paths.OPENSCE_SYN).items()}
 
 

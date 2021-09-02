@@ -73,7 +73,6 @@ def get_devices(devices):
       return 'cpu'
 
 
-
 def replace_params_with_buffers(module: nn.Module):
   for m in module.modules():
     for n, param in list(m.named_parameters(recurse=False)):
@@ -116,13 +115,6 @@ def stack_and_pad(tensors: List, max_len=None, pad=0.0) -> torch.Tensor:
   for i, t in enumerate(tensors):
     out[i, :t.size(0)] = t
   return out
-
-
-def binary_mask(seq_lens, max_len=None):
-  if max_len is None:
-    max_len = seq_lens.max()
-  ixs = torch.arange(max_len, device=seq_lens.device, dtype=seq_lens.dtype)
-  return ixs.unsqueeze(0) < seq_lens.unsqueeze(0)
 
 
 def find_models(roots, require_runs=True, require_done=True):

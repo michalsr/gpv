@@ -56,6 +56,7 @@ ALL_TASKS = GPV2_TASKS + [Task.WEBQA]
 
 
 class Dataset(Registrable):
+  """Dataset we can train/evaluate on"""
 
   def get_task(self) -> Task:
     raise NotImplementedError()
@@ -64,9 +65,15 @@ class Dataset(Registrable):
     raise NotImplementedError()
 
   def get_name(self) -> str:
+    """Get the name of the dataset
+
+    Should by uniquely identified with the set of examples `load` returns since we might
+    use it for caching.
+    """
     raise NotImplementedError()
 
   def load(self) -> List:
+    """Loads the examples"""
     raise NotImplementedError()
 
 

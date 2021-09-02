@@ -383,12 +383,12 @@ class ReplaceAll:
 class FindAll:
 
   def __init__(self, replacements: Dict[str, str]):
-    rep_sorted = sorted(replacements, key=len, reverse=True)  # Match longest first
     self.replacements = replacements
+    rep_sorted = sorted(self.replacements, key=len, reverse=True)  # Match longest first
     self.pattern = re.compile(r"(?:^|\W)(" + "|".join(regex.escape(x) for x in rep_sorted) + r")(?=\W|$)",
                               flags=re.IGNORECASE)
 
-  def replace(self, target: str) -> Set[str]:
+  def find(self, target: str) -> Set[str]:
     return set(self.replacements[x.lower()] for x in self.pattern.findall(target))
 
 
