@@ -19,7 +19,7 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
                       choices=[str(x) for x in Task] +
                               ["o" + x.value for x in OPENSCE_TASKS] +
                               ["webqa-fifth"] +
-                              ["all", "gpv1", "gpv2", "opensce"], nargs="+")
+                              ["all", "gpv1", "gpv2", "gpv2-eval", "opensce"], nargs="+")
   if sample:
     parser.add_argument("--sample", type=int)
 
@@ -46,16 +46,25 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
   if any(x == "all" for x in parts):
     parts = ["val", "train", "test"]
 
+  sample = None if not sample else getattr(args, "sample", None)
+
+  to_show = []
   open_sce_tasks = set()
   gpv_tasks = set()
   webqa_names = set()
   for dataset in args.datasets:
     if dataset == "gpv1":
       gpv_tasks.update(GPV1_TASKS)
+    elif dataset == "gpv2-eval":
+      part = "test" if split else "val"
+      for task in GPV2_TASKS:
+        to_show += [GpvDataset(task, part, split, sample)]
     elif dataset == "webqa-fifth":
       webqa_names.add("fifth")
-    elif dataset == "webqa-all":
-      webqa_names.add("all")
+    elif dataset in {"webqa-v1"}:
+      webqa_names.add("all-v1")
+    elif dataset in {"webqa-all", "webqa"}:
+      webqa_names.add("all-v2")
     elif dataset == "webqa-80":
       webqa_names.add("80")
     elif dataset == "gpv2":
@@ -69,8 +78,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
     else:
       raise NotImplementedError(dataset)
 
-  sample = None if not sample else getattr(args, "sample", None)
-  to_show = []
+
   for task in gpv_tasks:
     for part in parts:
       to_show += [GpvDataset(task, part, split, sample=sample)]
