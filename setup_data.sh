@@ -1,7 +1,7 @@
 BUCKET="https://ai2-prior-gpv.s3-us-west-2.amazonaws.com/public"
 
 # set to the location where you want to store downloaded data (data_dir)
-GPV_DATA=$1
+GPV_DATA=~/data/gpv
 
 # download and extract coco and coco-sce splits
 mkdir -p $GPV_DATA
@@ -18,3 +18,9 @@ wget $BUCKET/detr/detr_coco_sce.pth -P $GPV_DATA/detr/
 
 # Download coco images
 python -m data.coco.download download_coco_images_only=True download_coco_test_images=True output_dir=$GPV_DATA
+
+# Download vinvl, file_paths.PRECOMPUTED_FEATURES_DIR points to "data-cache/precomputed-features"
+mkdir -p data-cache
+mkdir -p data-cache/precomputed-features
+mkdir -p data-cache/precomputed-features/coco
+wget https://ai2-prior-gpv.s3.us-west-2.amazonaws.com/precomputed-image-features/coco/vinvl.hdf5 -O data-cache/precomputed-features/coco/vinvl.hdf5
