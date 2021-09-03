@@ -20,7 +20,5 @@ wget $BUCKET/detr/detr_coco_sce.pth -P $GPV_DATA/detr/
 python -m data.coco.download download_coco_images_only=True download_coco_test_images=True output_dir=$GPV_DATA
 
 # Download vinvl, file_paths.PRECOMPUTED_FEATURES_DIR points to "data-cache/precomputed-features"
-mkdir -p data-cache
-mkdir -p data-cache/precomputed-features
 mkdir -p data-cache/precomputed-features/coco
 wget https://ai2-prior-gpv.s3.us-west-2.amazonaws.com/precomputed-image-features/coco/vinvl.hdf5 -O data-cache/precomputed-features/coco/vinvl.hdf5
