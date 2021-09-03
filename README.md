@@ -9,7 +9,6 @@ To clone the repository use:
 
 ```
 git clone --recurse-submodules git@github.com:chrisc36/gpv.git
-git checkout 
 ```
 
 # Installation
@@ -20,11 +19,11 @@ conda create -n gpv python=3.6 -y
 conda activate gpv
 ```
 
-Next install [pytorch](https://pytorch.org/), I have been using pytorch 1.8, 
+Next install [pytorch](https://pytorch.org/), I have been using pytorch 1.8.1, 
 other versions might work but are not tested. For example:
 
 ```
-conda install pytorch==1.8.0 torchvision==0.9.0 torchaudio==0.8.0 cudatoolkit=11.1 -c pytorch -c conda-forge
+conda install pytorch==1.8.1 torchvision==0.9.1 cudatoolkit=11.1 -c pytorch -c conda-forg
 ```
 
 but you might need to change that command depending on your operating system/gpu setup.
@@ -55,15 +54,19 @@ the addition of web data.
 
 To train on devices 0 and 1 of your machine without web data:
 
-```angular2html
-
+```
+python exp/ours/experiments/train_t5.py --device 0 1 --num_workers 3 --task gpv2 --output_dir /path/to/output/dir
 ```
 
 For debugging purposes I recommend using the --debug flag and reducing the number of devices and 
 workers to 0 which will get you much faster startup times and better error messages:
 
-```angular2html
-
+```
+python exp/ours/experiments/train_t5.py --device 0 --num_workers 0 --task gpv2 --output_dir /path/to/output/dir --debug small
 ```
 
 which will run the model on a small sample of the data and without complicated distributed training.
+
+# Eval
+The main eval scripts are compute_topn_predictions.py and eval_predictions.py
+TODO: More details.
