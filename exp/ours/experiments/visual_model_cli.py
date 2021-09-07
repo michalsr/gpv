@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from os.path import exists
 
 from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.image_featurizer import vinvl_featurizer
@@ -58,12 +59,21 @@ def get_image_featurizer(args) -> Tuple[ImageFeatureExtractor, int]:
     if args.vfreeze != "all":
       raise ValueError()
     dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor(["coco/vinvl", "opensce/vinvl", "web/vinvl"], box_embedder=BasicBoxEmbedder())
+    sources = ["coco/vinvl", "opensce/vinvl", "web/vinvl"]
+    filtered = []
+    for src in sources:
+      if not exists(image_utils.get_hdf5_image_file(src)):
+        logging.warning(f"VinVL feature file {src} not found, some datasets will not be supported")
+      else:
+        filtered.append(src)
+    if len(filtered) == 0:
+      raise ValueError("No VinVL features found")
+    extractor = Hdf5FeatureExtractor(filtered, box_embedder=BasicBoxEmbedder())
   elif args.vmodel == "coco-vinvl":  # winvl-web
     if args.vfreeze != "all":
       raise ValueError()
     dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl", box_embedder=BasicBoxEmbedder())
+    extractor = Hdf5FeatureExtractor("coco/vinvl", box_embedder=BasicBoxEmbedder())
   elif args.vmodel == "vinvl-r50c4-4setvg":
     if args.vfreeze != "all":
       raise ValueError()
