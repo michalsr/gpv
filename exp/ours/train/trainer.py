@@ -209,9 +209,7 @@ class Trainer(FromParams):
   evaluation: Dict[Task, EvaluationSetup]
   optimizer: OptimizerBuilder
   epochs: int
-  end_at_epoch: Optional[int] = None
-
-  find_unused_parameters: bool = True
+  train_loader: DataLoaderBuilder
 
   # Additional optimization settings
   step_schedule: TrainingScheduleBuilder = None
@@ -219,7 +217,8 @@ class Trainer(FromParams):
   clip_grad_norm: Optional[float] = None
 
   # Data iterator parameters
-  train_loader: DataLoaderBuilder = None
+  find_unused_parameters: bool = True
+  end_at_epoch: Optional[int] = None
   eval_loader: DataLoaderBuilder = None
 
   # Should we balance the different train dataset between batches
@@ -910,7 +909,12 @@ class Trainer(FromParams):
       model.train()
 
       if hasattr(tr_sampler, "set_epoch"):
+        # Some samplers need set_epoch to be set each epoch
         tr_sampler.set_epoch(epoch)
+      if hasattr(train_loader.dataset, "set_epoch"):
+        # This supports some very experimental work I was doing with more complex datasets
+        # this is not in the main branch
+        train_loader.dataset.set_epoch(epoch)
 
       if is_primary():
         pbar = tqdm(train_loader, disable=not self.epoch_pbar, ncols=100, desc="loss=", total=n_train_batches)

@@ -15,9 +15,48 @@ from utils.set_criterion import SetCriterion
 from torch.nn import functional as F
 
 
+@dataclass
+class GpvBatchLabels:
+  """Labels for a batch of training data"""
+  # TODO maybe we should just store GpvExample's instead
+
+  tasks: List[Task]
+  text_labels: torch.Tensor
+  box_targets: List
+  segmentation_labels: List
+
+  # support `to` and `pin_memory` so this object can be used in a torch.DataLoader
+  def to(self, device):
+    return GpvBatchLabels(
+      self.tasks,
+      our_utils.to_device(self.segmentation_labels, device),
+      our_utils.to_device(self.box_targets, device),
+      our_utils.to_device(self.text_labels, device),
+    )
+
+  def pin_memory(self):
+    return GpvBatchLabels(
+      self.tasks,
+      our_utils.pin_memory_recursive(self.segmentation_labels),
+      our_utils.pin_memory_recursive(self.box_targets),
+      our_utils.pin_memory_recursive(self.text_labels)
+    )
+
+
+@dataclass
+class GpvBatchPrediction:
+  """Predictions for a batch of training data"""
+
+  logits: torch.Tensor
+  pred_boxes: torch.Tensor
+  pred_rel: torch.Tensor
+  n_boxes: torch.Tensor
+  # TODO add the output for segmentation
+
+
 class GPVLoss(Registrable, nn.Module):
 
-  def forward(self, logits, labels, pred_boxes, pred_rel, n_boxes, box_targets, tasks):
+  def forward(self, prediction: GpvBatchPrediction, labels: GpvBatchLabels):
     raise NotImplementedError()
 
 
@@ -140,64 +179,58 @@ class BasicGPVLoss(GPVLoss):
     params: Params,
     **kwargs
   ):
+    old_weight_params = ["cap_w", "vqa_w", "cls_w", "ident_w", "webqa_w"]
+    for name in old_weight_params:
+      if name in params:
+        assert params.pop(name) == 1.0
+
     loc = params["localization"]
-    if "ident_w" not in params:
-      params["ident_w"] = 1.0
-    if "webqa_w" not in params:
-      params["webqa_w"] = 1.0
     if "type" not in loc:
       loc["type"] = "detr-loss"
       for k in ["class_w", "bbox_w", "giou_w"]:
         loc[k] = params.pop("loc_" + k)
+
     return super().from_params(params, **kwargs)
 
   def __init__(
       self,
-      cap_w: float, vqa_w: float, cls_w: float, ident_w: float, webqa_w: float,
-      localization: LocalizationLoss, sum_seq_tokens
+      localization: LocalizationLoss, sum_seq_tokens=False
   ):
     super().__init__()
-    self.vqa_w = vqa_w
-    self.cap_w = cap_w
-    self.cls_w = cls_w
-    self.ident_w = ident_w
-    self.webqa_w = webqa_w
     self.localization = localization
     self.sum_seq_tokens = sum_seq_tokens
-    self.ce_weight_table = {
-      Task.CAPTIONING: cap_w,
-      Task.VQA: vqa_w,
-      Task.CLS: cls_w,
-      Task.CLS_IN_CONTEXT: ident_w,
-      Task.WEBQA: webqa_w,
-    }
 
-  def forward(self, logits, labels, pred_boxes, pred_rel, n_boxes, box_targets, tasks):
+  def forward(self, prediction: GpvBatchPrediction, batch_labels: GpvBatchLabels):
     task_to_ix = collections.defaultdict(list)
-    for i, task in enumerate(tasks):
+    for i, task in enumerate(batch_labels.tasks):
       task_to_ix[task].append(i)
+    labels = batch_labels.text_labels
 
     losses = {}
     total_loss = 0
     for task, ix_lst in task_to_ix.items() :
       ixs = torch.as_tensor(ix_lst, device=labels.device, dtype=torch.long)
+      n_boxes = prediction.n_boxes
       if task == Task.DETECTION:
         total, log = self.localization(
-          pred_boxes[ixs], pred_rel[ixs],
+          prediction.pred_boxes[ixs], prediction.pred_rel[ixs],
           None if n_boxes is None else n_boxes[ixs],
-          [box_targets[i] for i in ix_lst])
+          [batch_labels.box_targets[i] for i in ix_lst])
         losses.update(log)
         total_loss += total
+      elif task == Task.SEGMENTATION:
+        segmentation_labels = [batch_labels.segmentation_labels[i] for i in ix_lst]
+        raise NotImplementedError()
       else:
         task_labels = labels[ixs]
-        task_logits = logits[ixs]
+        task_logits = prediction.logits[ixs]
         if self.sum_seq_tokens:
           task_loss = F.cross_entropy(
             task_logits.view(-1, task_logits.size(-1)), task_labels.view(-1), reduction='sum')
-          task_loss = task_loss / logits.size(0)
+          task_loss = task_loss / task_logits.size(0)
         else:
           task_loss = F.cross_entropy(task_logits.view(-1, task_logits.size(-1)), task_labels.view(-1))
         losses[str(task) + "-loss"] = task_loss
-        total_loss += task_loss * self.ce_weight_table[task]
+        total_loss += task_loss
 
     return total_loss, losses

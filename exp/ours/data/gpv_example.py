@@ -8,14 +8,22 @@ from exp.ours.data.dataset import Task
 
 
 @dataclass(frozen=True)
+class SegmentationLabel:
+  uscrowd: int
+  area: float
+  segmentation: None
+
+
+@dataclass(frozen=True)
 class GPVExample:
   """Data representation that can be passed to GPV `collate` functions
 
   This representation puts the "raw" input examples for various tasks into a universal format
-  so examples from different task can be jointly processed, and may encomposs some pre-processing,
+  so examples from different task can be jointly processed, and may encompass some pre-processing,
   like deciding what queries to use for an example, or tokenizing the text
   """
 
+  """ID for this example that is unique among all datasets"""
   id: str
 
   """Task this example if for"""
@@ -39,6 +47,9 @@ class GPVExample:
   """Optional array boxes that are part of the query in [x, y, h, w] form"""
   query_boxes: np.ndarray = None
 
+  """Optional array boxes that are part of the query in [x, y, h, w] form"""
+  segmentation_label: Optional[SegmentationLabel] = None
+
   """Optional key for grouping examples into batches"""
   sort_len: Optional[int] = None
 
@@ -46,3 +57,4 @@ class GPVExample:
 
   def get_gpv_id(self):
     return self.id
+

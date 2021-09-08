@@ -9,6 +9,7 @@ from transformers import PreTrainedTokenizer, T5Tokenizer
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater
+from exp.ours.models.losses import GpvBatchLabels
 from exp.ours.train.optimizer_builder import ParameterSet
 import numpy as np
 
@@ -99,14 +100,25 @@ class CollateWithTokenizer(Callable):
       answers = self.tokenizer(
         answers, return_tensors='pt', padding=True, max_length=self.ans_len)
 
+    if any(x.segmentation_label is not None for x in batch):
+      # raise NotImplementedError("Collate segmentation labels")
+      segmentation_labels = [None for _ in batch]
+    else:
+      segmentation_labels = [None for _ in batch]
+
+    labels = GpvBatchLabels(
+      [x.task for x in batch],
+      answers["input_ids"],
+      box_targets,
+      segmentation_labels=segmentation_labels
+    )
+
     out = dict(
       input_ids=queries["input_ids"],
       input_mask=queries["attention_mask"],
-      labels=answers["input_ids"],
-      tasks=[x.task for x in batch]
+      labels=labels,
+      image_inputs=image_inputs
     )
-    out["image_inputs"] = image_inputs
-    out["box_targets"] = box_targets
 
     if self.other_collate:
       out.update(self.other_collate.collate(batch, out))

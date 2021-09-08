@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 from os.path import join
 from typing import List
 
+from exp.ours.data.coco_segmentation import CocoSegmentationDataset
 from exp.ours.data.dataset import Task, GPV1_TASKS, GPV2_TASKS
 from exp.ours.data.gpv import GpvDataset
 from exp.ours.data.opensce import OPENSCE_TASKS, OpenSceDataset
@@ -16,9 +17,9 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
                       choices=["val", "test", "all", "train"], nargs="+")
   parser.add_argument("--datasets", default=task_default,
                       required=task_default is None,
-                      choices=[str(x) for x in Task] +
+                      choices=[str(x) for x in GPV1_TASKS] +
                               ["o" + x.value for x in OPENSCE_TASKS] +
-                              ["webqa-fifth"] +
+                              ["webqa-fifth", "webqa", "segmentation"] +
                               ["all", "gpv1", "gpv2", "gpv2-eval", "opensce"], nargs="+")
   if sample:
     parser.add_argument("--sample", type=int)
@@ -52,6 +53,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
   open_sce_tasks = set()
   gpv_tasks = set()
   webqa_names = set()
+  segmentation = False
   for dataset in args.datasets:
     if dataset == "gpv1":
       gpv_tasks.update(GPV1_TASKS)
@@ -65,6 +67,8 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
       webqa_names.add("all-v1")
     elif dataset in {"webqa-all", "webqa"}:
       webqa_names.add("all-v2")
+    elif dataset in {"seg"}:
+      segmentation = True
     elif dataset == "webqa-80":
       webqa_names.add("80")
     elif dataset == "gpv2":
@@ -78,7 +82,9 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
     else:
       raise NotImplementedError(dataset)
 
-
+  if segmentation:
+    for part in parts:
+      to_show += [CocoSegmentationDataset(part, sample)]
   for task in gpv_tasks:
     for part in parts:
       to_show += [GpvDataset(task, part, split, sample=sample)]

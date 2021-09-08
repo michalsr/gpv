@@ -11,6 +11,7 @@ from pycocoevalcap.cider.cider import Cider
 import third_party.detection_metrics.lib.Evaluator as det_evaluator
 from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
+from exp.ours.data.coco_segmentation import SegmentationExample
 from exp.ours.data.gpv_example import GPVExample
 
 from exp.ours.data.dataset import VqaExample, CaptioningExample, ClsExample, LocalizationExample
@@ -113,6 +114,14 @@ class PerExampleEvaluator(Evaluator):
           out[ResultKey(metric_name, subset_name)] = (float(np.sum(score[ixs])), len(ixs))
 
     return out
+
+
+@Evaluator.register("seg-evaluator")
+class SegmentationEvaluator(PerExampleEvaluator):
+
+  def evaluate_examples(self, examples: List[SegmentationExample],
+                        predictions: Dict[str, GPVExampleOutput], add_scores=False):
+    raise NotImplementedError()
 
 
 @Evaluator.register("vqa-evaluator")

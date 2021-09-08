@@ -2,7 +2,7 @@ import numpy as np
 from collections import Counter
 from tqdm import tqdm
 from data.coco.synonyms import SYNONYMS
-from third_party.pycocoevalcap.eval import *
+from pycocoevalcap.eval import *
 import third_party.detection_metrics.lib.Evaluator as det_evaluator
 
 task_to_id = {
@@ -148,7 +148,6 @@ class CocoCaptioning(CocoEval):
             # 'Spice': Spice()
         }
 
-        
     def evaluate(self,novelty='everything'):
         absent = 0
 
@@ -174,7 +173,7 @@ class CocoCaptioning(CocoEval):
             cap_id = sample['cap_id']
             refs[cap_id] = []
             for c in gt_answers:
-                refs[cap_id].append({'caption':c})
+                refs[cap_id].append({'caption': c})
 
             hyps[cap_id] = [{'caption':pred_answer}]
         
@@ -188,7 +187,7 @@ class CocoCaptioning(CocoEval):
             'total': len(hyps),
             'scores': {}
         }
-        print(metrics)
+
         for metric,scorer in self.scorers.items():
             if is_empty is True:
                 if metric=='Bleu':

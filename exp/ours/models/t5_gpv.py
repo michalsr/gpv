@@ -7,15 +7,16 @@ from allennlp.common import Params
 from transformers import AutoTokenizer, AutoConfig
 
 from exp.ours.data.gpv import COCO_CATEGORIES
+from exp.ours.data.webqa_templates import WebQaQueryGenerator
 from exp.ours.models.model import GPVModel, build_per_example_output
 from exp.ours.models.gpv1_preprocessing import Gpv1Preprocessor
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures
 from exp.ours.models.layers import Layer, Linear
-from exp.ours.models.losses import GPVLoss, BasicGPVLoss
+from exp.ours.models.losses import GPVLoss, BasicGPVLoss, GpvBatchPrediction, GpvBatchLabels
 import numpy as np
 
 from exp.ours.models.model_utils import CollateWithTokenizer
-from exp.ours.models.t5_custom import OurT5ForConditionalGeneration
+from exp.ours.models.t5_custom import OurT5ForConditionalGeneration, RelevanceWeighting
 from exp.ours.train.runner import BeamSearchSpec
 from exp.ours.util import our_utils
 from exp.ours.util.nlp_utils import encode_with_cache, t5_initialize_decoding
@@ -73,12 +74,17 @@ class T5GPV(GPVModel):
     params: Params,
     **kwargs,
   ):
+    # Handle various backwards compatibility issues
     if "image_feature_extractor" not in params:
       _fix_old_params(params)
     if "box_aux_loss" in params:
       assert params.pop("box_aux_loss") is None
     if "nms" in params and params["nms"] == 0.0:
       params["nms"] = None
+    if "webqa_templates" not in params:
+      params["webqa_templates"] = None
+    if "relevance_embedding" not in params and "relevance_conditioning" in params:
+      params["relevance_embedding"] = params.pop("relevance_conditioning")
     return super().from_params(params, **kwargs)
 
   def __init__(
@@ -96,7 +102,10 @@ class T5GPV(GPVModel):
       freeze_embed=False,
       initialize_joiner="coco",
       nms: float=None,
-      all_lower_case=False
+      all_lower_case=False,
+      relevance_embedding: None=None,
+      relevance_conditioning: RelevanceWeighting=None,
+      webqa_templates: Union[str, WebQaQueryGenerator]="v1"
   ):
     super().__init__()
     if nms == 0.0:
@@ -111,6 +120,8 @@ class T5GPV(GPVModel):
     self.freeze_embed = freeze_embed
     self.t5_model_name = t5_model_name
     self.loss = loss
+    self.relevance_embedding = relevance_embedding
+    self.relevance_conditioning = relevance_conditioning
     self.image_feature_extractor = image_feature_extractor
     self.initialize_t5 = initialize_t5
     self.predict_trailing_pad_tokens = predict_trailing_pad_tokens
@@ -118,11 +129,18 @@ class T5GPV(GPVModel):
     self.pre_tokenize = pre_tokenize
     self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
+    self.webqa_templates = webqa_templates
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
 
     self.tokenizer = AutoTokenizer.from_pretrained(self.t5_model_name)
+
+    # Speed up tokenization by caching per-token tokenization
     self.tokenizer_cache = {}
+
+    # Store text->tokens data, mainly used to reduce memory usage so we don't
+    # build new objects for duplicate queries
+    self.full_text_cache = {}
 
     if self.image_seperator:
       self.tokenizer.add_tokens([self.IMAGE_SEP])
@@ -134,7 +152,7 @@ class T5GPV(GPVModel):
 
     self.image_joiner = image_joiner
 
-    self.preprocesser = Gpv1Preprocessor()
+    self.preprocesser = Gpv1Preprocessor(self.webqa_templates)
     self.preprocesser.init(self._pre_tokenize)
 
     self.model = None
@@ -148,10 +166,14 @@ class T5GPV(GPVModel):
   def _pre_tokenize(self, text: str) -> Union[str, np.ndarray]:
     if self.all_lower_case:
       text = text.lower()
-    if self.pre_tokenize:
-      return np.array(encode_with_cache(text, self.tokenizer, self.tokenizer_cache))
-    else:
+    if not self.pre_tokenize:
       return text
+    if text in self.full_text_cache:
+      return self.full_text_cache[text]
+    else:
+      out = np.array(encode_with_cache(text, self.tokenizer, self.tokenizer_cache))
+      self.full_text_cache[text] = out
+      return out
 
   def initialize(self):
     if self.initialize_t5:
@@ -182,6 +204,9 @@ class T5GPV(GPVModel):
     t5_dim = self.model.config.d_model
     n_heads = self.model.config.num_heads
 
+    if self.relevance_conditioning is not None:
+      self.model.set_rel_conditioning(self.relevance_conditioning)
+
     if self.image_relevance is None:
       self.obj_cls = nn.Linear(t5_dim, 2)
 
@@ -196,6 +221,11 @@ class T5GPV(GPVModel):
       self.learned_image_text_bias = None
       self.learned_image_image_bias = None
       self.learned_text_image_bias = None
+
+    if self.relevance_embedding in {"embedding-v1", "embedding-v2"}:
+      self._relevance_embedding = nn.Parameter(torch.zeros(2, t5_dim).uniform_(-0.05, 0.05))
+    else:
+      self._relevance_embedding = None
 
     if self.freeze_embed:
       self.model.get_input_embeddings().weight.requires_grad = False
@@ -314,38 +344,57 @@ class T5GPV(GPVModel):
     return encoder_outputs, input_mask, image
 
   def _image_rel(self, encoder, image: ImageRegionFeatures):
-    if self.image_relevance is None:
-      n_images = image.boxes.size(1)
-      return self.obj_cls(encoder[:, :n_images])
-    else:
-      rel = self.image_relevance(encoder, image.objectness, image.boxes)
-      if len(rel.size()) == 2:
-        return torch.stack([rel, torch.zeros_like(rel)], -1)
-      else:
-        return rel
+    rel = self.image_relevance(encoder, image.objectness, image.boxes)
+    if len(rel.size()) == 2:
+      # TODO can we just use sigmoid?
+      # convert sigmoid logits -> softmax logits
+      rel = torch.stack([rel, torch.zeros_like(rel)], -1)
+    return rel
 
-  def forward(self, image_inputs, input_ids, input_mask, labels=None,
-              box_targets=None, tasks=None, label_masks=None) -> Tuple[torch.Tensor, Dict[str, float]]:
+  def _rel_embedding(self, rel, encoder_outputs, image):
+    batch_size, seq_len, dim = encoder_outputs.last_hidden_state.size()
+    self.model.set_rel_weights(rel, image.n_boxes)
+    if self.relevance_embedding == "embedding-v1":
+      rel_probs = rel.softmax(-1)
+      rel_probs = F.pad(rel_probs, [0, 0, 0, seq_len-rel_probs.size(1), 0, 0], value=0.0)
+      encoder_outputs.last_hidden_state = (
+          encoder_outputs.last_hidden_state +
+          self._relevance_embedding[0].view(1, 1, dim) * rel_probs[:, :, :1] +
+          self._relevance_embedding[1].view(1, 1, dim) * rel_probs[:, :, 1:]
+      )
+
+    elif self.relevance_embedding == "embedding-v2":
+      rel_probs = rel.softmax(-1)[:, :, 0]
+      batch_size, seq_len, dim = encoder_outputs.last_hidden_state.size()
+      rel_probs = F.pad(rel_probs, [0, seq_len-rel_probs.size(1), 0, 0], value=1.0)
+      encoder_outputs.last_hidden_state = (
+          encoder_outputs.last_hidden_state +
+          self._relevance_embedding[0].view(1, 1, dim) * rel_probs
+      )
+
+  def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels) -> Tuple[torch.Tensor, Dict[str, float]]:
 
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
+    rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
+    self._rel_embedding(rel, encoder_outputs, image_features)
 
     t5_out = self.model(
       encoder_outputs=encoder_outputs,
       attention_mask=input_mask,
-      labels=labels,
-      return_dict=True
+      labels=labels.text_labels,
+      return_dict=True,
     )
 
     if not self.predict_trailing_pad_tokens:
       # -100 marks a label as not a target
-      labels = labels.masked_fill(labels == self.tokenizer.pad_token_id, -100)
-
-    rel = self._image_rel(t5_out.encoder_last_hidden_state, image_features)
+      labels.text_labels = labels.text_labels.masked_fill(
+        labels.text_labels == self.tokenizer.pad_token_id, -100)
 
     boxes = image_features.boxes
     n_boxes = image_features.n_boxes
 
-    loss, monitor = self.loss(t5_out.logits, labels, boxes, rel, n_boxes, box_targets, tasks)
+    batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
+    loss, monitor = self.loss(batch_pred, labels)
     return loss, monitor
 
   def set_prediction_args(
@@ -389,15 +438,15 @@ class T5GPV(GPVModel):
       self.register_buffer("mask", answer_mask)
 
   def predict(
-      self, image_inputs, input_ids, input_mask, labels=None,
-      box_targets=None, tasks=None,
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels
   ):
-    task = tasks[0]
-    if not all(x == task for x in tasks):
+    task = labels.tasks[0]
+    if not all(x == task for x in labels.tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
 
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
     rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
+    self._rel_embedding(rel, encoder_outputs, image_features)
     rel = rel.softmax(-1)[:, :, 0]
 
     if self.beam_search_spec is not None:
