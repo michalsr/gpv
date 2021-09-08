@@ -9,7 +9,7 @@ from exp.ours.data.dataset import Task
 
 @dataclass(frozen=True)
 class SegmentationLabel:
-  uscrowd: int
+  iscrowd: int
   area: float
   segmentation: None
 
@@ -47,7 +47,7 @@ class GPVExample:
   """Optional array boxes that are part of the query in [x, y, h, w] form"""
   query_boxes: np.ndarray = None
 
-  """Optional array boxes that are part of the query in [x, y, h, w] form"""
+  """Optional labels for segmentation tasks"""
   segmentation_label: Optional[SegmentationLabel] = None
 
   """Optional key for grouping examples into batches"""
