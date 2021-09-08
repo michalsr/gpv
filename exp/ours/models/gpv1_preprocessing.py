@@ -1,12 +1,14 @@
 from allennlp.common import Params
 from dataclasses import replace
 
-from exp.ours.data.gpv_example import GPVExample
+from exp.ours.data.coco_segmentation import SegmentationExample
+from exp.ours.data.gpv_example import GPVExample, SegmentationLabel
 from exp.ours.data.dataset import *
 import torchvision.transforms as T
 import numpy as np
 
 from exp.ours.data.webqa import WebQaExample
+from exp.ours.data.webqa_templates import WebQaQueryGenerator
 
 NORMALIZE_TRANSFORM = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
@@ -97,6 +99,21 @@ BBOX_QUERIES = [
   'Find all instances of {} in this image.',
 ]
 
+SEGMENTATION_QUERIES = [
+  'Segment {}.',
+  'Segment {} in the image.',
+  'Segment {} in this image.',
+  'Segment instances of {}.',
+  'Segment instances of {} in the image.',
+  'Segment instances of {} in this image.',
+  'Segment all instances of {}.',
+  'Segment all instances of {} in the image.',
+  'Segment all instances of {} in this image.',
+  'Find the masks of {}.',
+  'Find the masks of {} in the image.',
+  'Find the masks of {} in this image.',
+]
+
 CLS_QUERIES = [
   'What is this?',
   'What is this object?',
@@ -107,21 +124,12 @@ CLS_QUERIES = [
 
 class Gpv1Preprocessor(FromParams):
 
-  @classmethod
-  def from_params(
-        cls,
-        params: Params,
-        **kwargs,
-    ) -> T:
-      if "webqa_cls_queries" not in params:
-        params["webqa_cls_queries"] = False
-      return super().from_params(**kwargs)
-
-  def __init__(self, webqa_cls_queries=True):
-    self.webqa_cls_queries = webqa_cls_queries
+  def __init__(self, webqa_templates="v1"):
+    self.webqa_templates = webqa_templates
     self.preprocess_text = None
     self.cls_queries_tok = None
     self.caption_queries_tok = None
+    self._cache = {}
 
   def init(self, preprocess_text):
     self.preprocess_text = preprocess_text
@@ -160,6 +168,16 @@ class Gpv1Preprocessor(FromParams):
           target_answer=[self.preprocess_text(x.caption) for x in example.captions if x.caption is not None],
           meta=example.meta if include_meta else None
         )]
+    elif isinstance(example, SegmentationExample):
+      out = [GPVExample(
+        example.gpv_id,
+        Task.SEGMENTATION,
+        example.image_id,
+        [self.preprocess_text(x.format(example.category)) for x in SEGMENTATION_QUERIES],
+        segmentation_label=SegmentationLabel(
+          example.iscrowd, example.area, example.segmentation
+        )
+      )]
     elif isinstance(example, LocalizationExample):
       out = [GPVExample(
         example.gpv_id,
@@ -186,10 +204,35 @@ class Gpv1Preprocessor(FromParams):
         meta=example.meta if include_meta else None
       )]
     elif isinstance(example, WebQaExample):
-      if self.webqa_cls_queries and example.question_type == "1n":
-        query = self.cls_queries_tok
-      else:
+      if self.webqa_templates is None:
+        if example.query is None:
+          raise ValueError("Need webqa template specified")
         query = [self.preprocess_text(example.query)]
+      elif isinstance(self.webqa_templates, WebQaQueryGenerator):
+        query = [self.preprocess_text(x) for x in self.webqa_templates.get_prompts(example, is_train)]
+      else:
+        if self.webqa_templates == "v1":
+          if example.question_type == "n1":
+            query = self.cls_queries_tok
+          else:
+            raise NotImplementedError()
+        elif self.webqa_templates == "v2":
+          if example.question_type == "n1":
+            query = self.cls_queries_tok
+          elif example.question_type in {"a1", "a2"}:
+            raise NotImplementedError()
+
+          # So that leaves us with:
+          # 1a:
+          # “{What|Which} [adj_type] is {this|the} [noun]?”
+          # “What is the [adj_type] of {this|the} [noun]?”
+          # “{Describe|State|Characterize|Specify|Name} the [adj_type] of {this|the} [noun].”
+          # 1v:
+          # “What is {this|the} [noun] doing?”
+          # “What action is {this|the} [noun] taking?” (I don’t want to use the word “performing” instead of “taking” because that is an action in itself, e.g. dancer performing)
+          # “{Describe|State|Characterize|Specify|Name} the action being taken by {this|the} [noun].”
+          raise NotImplementedError()
+
       out = [GPVExample(
         example.gpv_id, example.task, example.image_id,
         query,

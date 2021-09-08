@@ -9,6 +9,7 @@ import h5py
 from exp.ours.boosting import SceUnseenCategories, OpenSceUnseenCategories
 from exp.ours.data.gpv import GpvDataset
 from exp.ours.data.opensce import OpenSceDataset
+from exp.ours.data.webqa import WebQaAnswersBoost
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -42,7 +43,6 @@ DEFAULT_MAX_SEQ_LEN = {
   Task.VQA: 20,
   Task.CLS: 8,
   Task.CLS_IN_CONTEXT: 8,
-  Task.WEBQA: 8,
   Task.CAPTIONING: 30
 }
 
@@ -108,7 +108,11 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
     if isinstance(dataset, GpvDataset):
       prediction_args["mask"] = SceUnseenCategories(task, args.boost_unseen, args.boost_syn)
     elif isinstance(dataset, OpenSceDataset):
-      prediction_args["mask"] = OpenSceUnseenCategories(task, args.boost_unseen, args.boost_syn)
+      if dataset.task == Task.CLS:
+        prediction_args["mask"] = OpenSceUnseenCategories(task, args.boost_unseen, args.boost_syn)
+      else:
+        # prediction_args["mask"] = WebQaAnswersBoost(args.boost_unseen)
+        prediction_args["mask"] = WebQaAnswersBoost(args.boost_unseen)
     else:
       raise NotImplementedError()
 
@@ -146,6 +150,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
     else:
       logging.info("Evaluating...")
     evaluator, subsets = get_evaluator(dataset)
+
     results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
 
     if output_dir is not None:
