@@ -419,7 +419,7 @@ def balanced_merge_multi(lsts: Iterable[List]) -> List:
     if len(out) == 0:
       next_i = np.argmax(target_ratios)
     else:
-      # keep a track of the current mixing ratio, and add in the most under-repersnted list
+      # keep a track of the current mixing ratio, and add in the most under-represented list
       # each step
       next_i = np.argmin(current_counts / len(out) - target_ratios)
     current_counts[next_i] += 1

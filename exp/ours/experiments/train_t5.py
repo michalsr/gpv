@@ -1,14 +1,18 @@
 import json
+import logging
 import os
 from copy import deepcopy
 
+import torch.utils.data
 from transformers import AutoConfig
 
-from exp.ours.data.webqa import WebQaDataset, WebQaAnswers
+from exp.ours.data.webqa import WebQaDataset
+from exp.ours.data.webqa_templates import WebQaQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
 from exp.ours.models.model_utils import BackboneParameterExtractor
+from exp.ours.models.t5_custom import MultiplyRenormalize, MultiplyRenormalizePlattScale
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
@@ -26,8 +30,13 @@ def main():
   parser.add_argument("--model", choices=["t5-small", "t5-base", "t5-large"], default=None)
   parser.add_argument("--lr", type=float, default=3e-4)
   parser.add_argument("--webqa_sample", type=float, default=1.0)
+  parser.add_argument("--webqa_subset",  default=None)
+  parser.add_argument("--find_unused", action="store_true")
+  parser.add_argument("--init_from")
   parser.add_argument("--vlr", type=float)
+  parser.add_argument("--train_from")
   parser.add_argument("--vwarmup", type=float, default=0.1)
+  parser.add_argument("--sce", action="store_true")
   parser.add_argument("--weight_decay", type=float, default=1e-4)
   parser.add_argument("--delay", type=float, default=0.0)
 
@@ -53,29 +62,23 @@ def main():
   localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, ['labels'])
   model = T5GPV(
     args.model,
-    loss=BasicGPVLoss(1, 1, 1, 1, 1, localization_loss, False),
+    loss=BasicGPVLoss(localization_loss),
     image_feature_extractor=image_featurizer,
     image_joiner=Linear(image_dim, t5_dim),
     pre_tokenize=True,
     image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
-    query_box=None,
-    all_lower_case=False
+    query_box="always",
+    all_lower_case=True,
+    webqa_templates=WebQaQueryGenerator(),
+    initialize_from=args.init_from
   )
 
-  groups = []
-  if args.vfreeze not in {"all", "backbone"}:
-    groups.append(ParameterGroup(
-      BackboneParameterExtractor(),
-      group_name="backbone",
-      overrides=dict(delay=args.delay, warmup=args.vwarmup, lr=args.vlr),
-    ))
-
-  groups.append(ParameterGroup(
+  groups = [ParameterGroup(
     AllParameters(),
     group_name="other",
     overrides=dict(delay=0.0, warmup=0.1, lr=args.lr),
     allow_overlap=True
-  ))
+  )]
 
   scheduler = DelayedWarmupScheduleBuilder()
   optimizer = AdamWBuilder(
@@ -92,35 +95,46 @@ def main():
     optimizer=optimizer, scheduler=scheduler
   )
 
-  webqa_name = "all-v2"
-  qtypes = "basic"
-  # Set the val set for debugging since loading the train set is slow
-  webqa_train = WebQaDataset(webqa_name, "val" if args.debug else "train",
-                             100 if args.debug else None, qtypes)
-  webqa_val = WebQaDataset(webqa_name, "val", 100 if args.debug else None, qtypes)
-  webqq_eval = EvaluationSetup(
-    evaluator.WebQaEvaluator(),
-    dict(beam_search_spec=BeamSearchSpec(1, 5),
-         answer_options=webqa_train.get_answer_options(False))
-  )
+  if args.webqa_subset is not None:
+    qtypes = args.webqa_subset
+    qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get(qtypes, (qtypes,))
+    # Set the val set for debugging since loading the train set is slow
+    webqa_train = WebQaDataset("val" if args.debug else "train",
+                               100 if args.debug else None, qtypes)
+    webqa_val = WebQaDataset("val", 100 if args.debug else None, qtypes)
+    webqq_eval = EvaluationSetup(
+      evaluator.WebQaEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 5),
+           answer_options=webqa_train.get_answer_options(False))
+    )
 
-  if webqa_train is not None:
     # Add the WebQaDataset we want to experiment with
+    # trainer.train_datasets = []
+    # trainer.eval_datasets = []
+    # trainer.best_model_key = [ResultKey(
+    #   metric_name="accuracy", dataset_name="webqa-val")]
+
     trainer.train_datasets.append(TrainerDataset(
       webqa_train, "webqa-tr",
       train_sample=args.webqa_sample,
       eval_sample=50 if args.debug else 3000, eval_setup=webqq_eval
     ))
     trainer.eval_datasets.append(TrainerDataset(
-      webqa_val, "webqa-val", eval_sample=50 if args.debug else None, eval_setup=webqq_eval))
+      webqa_val, "webqa-val", eval_sample=50 if args.debug else 12000, eval_setup=webqq_eval))
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
 
   trainer.stratify = True
   trainer.eval_loader = deepcopy(trainer.train_loader)
 
-  # This might save memory?
+  if not args.sce:
+    for ds in trainer.train_datasets:
+      ds.dataset.gpv_split = False
+    for ds in trainer.eval_datasets:
+      ds.dataset.gpv_split = False
+
   trainer.train_loader.persist_workers = False
   trainer.eval_loader.persist_workers = False
+  trainer.find_unused_parameters = args.find_unused
   run_trainer_from_args(trainer, model, args)
 
 

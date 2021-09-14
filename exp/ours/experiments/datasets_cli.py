@@ -25,8 +25,8 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
     parser.add_argument("--sample", type=int)
 
 
-def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> List[GpvDataset]:
-  if model_dir is not None and split is None:
+def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=None) -> List[GpvDataset]:
+  if model_dir is not None and trained_on_sce is None:
     # Figure out what gpv_split the model was trained on
     trainer = load_json_object(join(model_dir, "trainer.json"))
     train_split = set()
@@ -35,13 +35,16 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
       if ds["type"] == "gpv":
         train_split.add(ds["gpv_split"])
 
-    if len(train_split) != 1:
+    if len(train_split) == 0:
+      trained_on_sce = None
+    elif len(train_split) > 1:
       raise ValueError()
-    split = list(train_split)[0]
+    else:
+      trained_on_sce = list(train_split)[0]
   else:
-    if split not in {"coco", "coco_sce"}:
-      raise ValueError(f"Unknown split {split}")
-    split = split == "coco_sce"
+    if trained_on_sce not in {"coco", "coco_sce"}:
+      raise ValueError(f"Unknown split {trained_on_sce}")
+    trained_on_sce = trained_on_sce == "coco_sce"
 
   parts = list(args.part)
   if any(x == "all" for x in parts):
@@ -52,25 +55,21 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
   to_show = []
   open_sce_tasks = set()
   gpv_tasks = set()
-  webqa_names = set()
   segmentation = False
+  webqa = False
   for dataset in args.datasets:
     if dataset == "gpv1":
       gpv_tasks.update(GPV1_TASKS)
     elif dataset == "gpv2-eval":
-      part = "test" if split else "val"
+      if trained_on_sce is None:
+        raise ValueError()
+      part = "test" if trained_on_sce else "val"
       for task in GPV2_TASKS:
-        to_show += [GpvDataset(task, part, split, sample)]
-    elif dataset == "webqa-fifth":
-      webqa_names.add("fifth")
-    elif dataset in {"webqa-v1"}:
-      webqa_names.add("all-v1")
+        to_show += [GpvDataset(task, part, trained_on_sce, sample)]
     elif dataset in {"webqa-all", "webqa"}:
-      webqa_names.add("all-v2")
+      webqa = True
     elif dataset in {"seg"}:
       segmentation = True
-    elif dataset == "webqa-80":
-      webqa_names.add("80")
     elif dataset == "gpv2":
       gpv_tasks.update(GPV2_TASKS)
     elif dataset == "opensce":
@@ -87,12 +86,12 @@ def get_datasets_from_args(args, model_dir=None, sample=True, split=None) -> Lis
       to_show += [CocoSegmentationDataset(part, sample)]
   for task in gpv_tasks:
     for part in parts:
-      to_show += [GpvDataset(task, part, split, sample=sample)]
+      to_show += [GpvDataset(task, part, trained_on_sce, sample=sample)]
   for task in open_sce_tasks:
     for part in parts:
       to_show += [OpenSceDataset(task, part, sample=sample)]
-  for name in webqa_names:
+  if webqa:
     for part in parts:
-      to_show += [WebQaDataset(name, part, sample=sample)]
+      to_show += [WebQaDataset(part, sample=sample)]
   return to_show
 

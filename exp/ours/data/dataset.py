@@ -45,7 +45,11 @@ class Task(FromParams, enum.Enum):
     # that the object can be pickled
     return enum.Enum.__reduce_ex__(self, protocol)
 
+  # Support these to it can used in a dataloader
   def to(self, device):
+    return self
+
+  def pin_memory(self):
     return self
 
 

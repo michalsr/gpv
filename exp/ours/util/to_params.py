@@ -37,6 +37,8 @@ def _is_fromparams(anno):
 
 
 def to_params_any(obj, annotation):
+  """Convert and object with a type annotation to parameter or parameter dictionary"""
+
   if obj is None:
     # None is allowed for any annotation, so no type-checking required
     return obj
@@ -48,7 +50,7 @@ def to_params_any(obj, annotation):
   if origin is Union:
 
     if len(annotation.__args__) == 1:
-      # Note this can happen after `remove_optional(Optional[str])` as well as
+      # This can happen after `remove_optional(Optional[str])` as well as
       # from user type annotations
       annotation = annotation.__args__[0]
     else:

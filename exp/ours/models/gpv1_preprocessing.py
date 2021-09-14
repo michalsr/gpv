@@ -68,10 +68,10 @@ CAPTION_QUERIES = [
   'Describe the image.',
   'Caption this image.',
   'Caption the image.',
-  'What is happening in this image.',
-  'What is happening in the image.',
-  'What is going on in this image.',
-  'What is going on in the image.',
+  'What is happening in this image?',
+  'What is happening in the image?',
+  'What is going on in this image?',
+  'What is going on in the image?',
   'Generate a caption for this image.',
   'Generate a caption for the image.',
   'Generate a description for this image.',
@@ -124,16 +124,21 @@ CLS_QUERIES = [
 
 class Gpv1Preprocessor(FromParams):
 
-  def __init__(self, webqa_templates="v1"):
+  def __init__(self, webqa_templates: Optional[WebQaQueryGenerator]=None, webqa_cls=False):
     self.webqa_templates = webqa_templates
     self.preprocess_text = None
     self.cls_queries_tok = None
     self.caption_queries_tok = None
+    self.webqa_cls = webqa_cls
+    self.expand_cls = webqa_cls
     self._cache = {}
 
   def init(self, preprocess_text):
     self.preprocess_text = preprocess_text
-    self.cls_queries_tok = [preprocess_text(x) for x in CLS_QUERIES]
+    cls = CLS_QUERIES
+    if self.webqa_cls:
+      raise NotImplementedError()
+    self.cls_queries_tok = [preprocess_text(x) for x in cls]
     self.caption_queries_tok = [preprocess_text(x) for x in CAPTION_QUERIES]
 
   def preprocess_example(self, example, is_train=False, include_query_box=False, include_meta=False):
@@ -204,35 +209,7 @@ class Gpv1Preprocessor(FromParams):
         meta=example.meta if include_meta else None
       )]
     elif isinstance(example, WebQaExample):
-      if self.webqa_templates is None:
-        if example.query is None:
-          raise ValueError("Need webqa template specified")
-        query = [self.preprocess_text(example.query)]
-      elif isinstance(self.webqa_templates, WebQaQueryGenerator):
-        query = [self.preprocess_text(x) for x in self.webqa_templates.get_prompts(example, is_train)]
-      else:
-        if self.webqa_templates == "v1":
-          if example.question_type == "n1":
-            query = self.cls_queries_tok
-          else:
-            raise NotImplementedError()
-        elif self.webqa_templates == "v2":
-          if example.question_type == "n1":
-            query = self.cls_queries_tok
-          elif example.question_type in {"a1", "a2"}:
-            raise NotImplementedError()
-
-          # So that leaves us with:
-          # 1a:
-          # “{What|Which} [adj_type] is {this|the} [noun]?”
-          # “What is the [adj_type] of {this|the} [noun]?”
-          # “{Describe|State|Characterize|Specify|Name} the [adj_type] of {this|the} [noun].”
-          # 1v:
-          # “What is {this|the} [noun] doing?”
-          # “What action is {this|the} [noun] taking?” (I don’t want to use the word “performing” instead of “taking” because that is an action in itself, e.g. dancer performing)
-          # “{Describe|State|Characterize|Specify|Name} the action being taken by {this|the} [noun].”
-          raise NotImplementedError()
-
+      query = [self.preprocess_text(x) for x in self.webqa_templates.get_prompts(example, is_train)]
       out = [GPVExample(
         example.gpv_id, example.task, example.image_id,
         query,

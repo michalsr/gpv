@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torchvision.ops
 from allennlp.common import FromParams, Registrable, Params
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from torch import nn
 
 from exp.ours.data.dataset import Task
@@ -27,20 +27,12 @@ class GpvBatchLabels:
 
   # support `to` and `pin_memory` so this object can be used in a torch.DataLoader
   def to(self, device):
-    return GpvBatchLabels(
-      self.tasks,
-      our_utils.to_device(self.segmentation_labels, device),
-      our_utils.to_device(self.box_targets, device),
-      our_utils.to_device(self.text_labels, device),
-    )
+    return GpvBatchLabels(**{k: our_utils.to_device(v, device)
+                             for k, v in asdict(self).items()})
 
   def pin_memory(self):
-    return GpvBatchLabels(
-      self.tasks,
-      our_utils.pin_memory_recursive(self.segmentation_labels),
-      our_utils.pin_memory_recursive(self.box_targets),
-      our_utils.pin_memory_recursive(self.text_labels)
-    )
+    return GpvBatchLabels(**{k: our_utils.pin_memory_recursive(v)
+                             for k, v  in asdict(self).items()})
 
 
 @dataclass
