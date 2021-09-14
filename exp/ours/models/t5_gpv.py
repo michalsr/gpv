@@ -16,7 +16,7 @@ from exp.ours.models.losses import GPVLoss, BasicGPVLoss, GpvBatchPrediction, Gp
 import numpy as np
 
 from exp.ours.models.model_utils import CollateWithTokenizer
-from exp.ours.models.t5_custom import OurT5ForConditionalGeneration, RelevanceWeighting
+from exp.ours.models.t5_custom import OurT5ForConditionalGeneration
 from exp.ours.train.runner import BeamSearchSpec
 from exp.ours.util import our_utils
 from exp.ours.util.nlp_utils import encode_with_cache, t5_initialize_decoding
@@ -63,7 +63,7 @@ class T5GPV(GPVModel):
       nms: float=None,
       all_lower_case=False,
       relevance_embedding: None=None,
-      relevance_conditioning: RelevanceWeighting=None,
+      relevance_conditioning=None,
       webqa_templates: Optional[WebQaQueryGenerator]=None,
       initialize_from=None
   ):
