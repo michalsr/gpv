@@ -99,7 +99,7 @@ class StratifiedSubsetSampler(Sampler):
         # No wrap around
         all_data.append(indices[start:end] + offset)
       else:
-        # Wraps around, get data from the previous cycle
+        # Wraps around, get the remaining data from the previous cycle
         all_data.append(indices[:(end % group_sz)] + offset)
         group_rng = np.random.RandomState(self._get_seed(group_cycle-1, i))
         indices = group_rng.permutation(group_sz)

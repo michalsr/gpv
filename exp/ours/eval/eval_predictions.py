@@ -7,20 +7,23 @@ import re
 from collections import defaultdict
 from datetime import datetime
 from os import listdir
-from os.path import join, exists, isdir, dirname
-from typing import Dict, List
+from os.path import join, exists, isdir, dirname, basename
+from typing import Dict, List, Iterable
 
+import regex
 from dataclasses import replace
 
 from data.coco.synonyms import SYNONYMS
 from exp.ours.data.dataset import CaptioningExample, ALL_TASKS, Task
 from exp.ours.data.gpv import GpvDataset, COCO_CATEGORIES
 from exp.ours.data.opensce import OpenSceDataset, OPENSCE_TASKS
+from exp.ours.data.webqa import WebQaDataset
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, LocalizationEvaluator, \
   ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator, OpenSceClsEvaluator, OpenSceVqaEvaluator
 from exp.ours.train.runner import GPVExampleOutput, load_gpv_predictions
 from exp.ours.util import py_utils, our_utils
+from exp.ours.util.py_utils import FindAll
 from exp.ours.util.to_params import to_params
 from utils.io import load_json_object, dump_json_object
 import numpy as np
@@ -33,13 +36,19 @@ def find_eval_files(run_dir, prefix):
     return output
   for subdir_name in listdir(eval_dir):
     subdir = join(eval_dir, subdir_name)
-    if subdir_name.startswith(prefix) and exists(join(subdir, "predictions.json")):
-      eval_name = subdir_name.split("--")[-1]
-      config = load_json_object(join(subdir, "config.json"))
-      ds = config["dataset"]
-      n_sample = (ds["sample"], ds.get("seen_sample", None), ds.get("unseen_sample", None))
-      n_sample = sum(0 if x is None else x for x in n_sample)
-      output[eval_name].append((subdir, None if n_sample == 0 else n_sample))
+    if subdir_name.startswith(prefix):
+      if exists(join(subdir, "predictions.json")) or exists(join(subdir, "eval.json")):
+        eval_name = subdir_name.split("--")[-1]
+        config = load_json_object(join(subdir, "config.json"))
+        ds = config["dataset"]
+        n_sample = (ds["sample"], ds.get("seen_sample", None), ds.get("unseen_sample", None))
+        n_sample = sum(0 if x is None else x for x in n_sample)
+        output[eval_name].append((subdir, None if n_sample == 0 else n_sample))
+
+  if len(output) == 0 and prefix.startswith("webqa-v4-val"):
+    # Keep evaluation from the older version of webqa, results are comparable
+    return find_eval_files(run_dir, prefix.replace("webqa-v4-val", "webqa-v2-val"))
+
 
   def _get_order(x):
     return 1e9 if x[1] is None else x[1]
@@ -77,7 +86,7 @@ def get_eval_if_cached(eval_dir):
   return None
 
 
-def cache_evaluation(prefix_or_dir, evaluator, stats):
+def cache_evaluation(prefix_or_dir, evaluator, stats, version=1):
   if isdir(prefix_or_dir) and not prefix_or_dir.endswith("/"):
     prefix_or_dir += "/"
   cache_file = prefix_or_dir + "eval.json"
@@ -86,7 +95,7 @@ def cache_evaluation(prefix_or_dir, evaluator, stats):
     stats=to_save,
     evaluator=to_params(evaluator, Evaluator),
     date=datetime.now().strftime("%m%d-%H%M%S"),
-    version=1,
+    version=version,
   )
   to_save_str = json.dumps(to_save, indent=2)
   with open(cache_file, "w") as f:
@@ -109,7 +118,7 @@ def get_evaluator(dataset):
         elif x.category not in unseen:
           return ["unseen"]
         else:
-          return  []
+          return []
     else:
       get_subsets = None
 
@@ -119,6 +128,12 @@ def get_evaluator(dataset):
       Task.VQA: OpenSceVqaEvaluator(),
       Task.CLS_IN_CONTEXT: OpenSceClsEvaluator()
     }[dataset.get_task()], get_subsets
+
+  if isinstance(dataset, WebQaDataset):
+    def get_subsets(x):
+      qtype = x.qtype
+      return [qtype, qtype[1:]]
+    return WebQaEvaluator(), get_subsets
 
   per_caption = True
   if isinstance(dataset, GpvDataset):
@@ -146,7 +161,6 @@ def get_evaluator(dataset):
     Task.DETECTION: LocalizationEvaluator(),
     Task.CLS: ClsEvaluator(),
     Task.CLS_IN_CONTEXT: ClsEvaluator(),
-    Task.WEBQA: WebQaEvaluator()
   }[dataset.get_task()]
   return evaluator, get_subsets
 
@@ -157,7 +171,6 @@ ALL_TABLE_TASK_METRICS = {
   Task.CAPTIONING: ["cider"],
   Task.CLS: ("accuracy", "top5-acc"),
   Task.CLS_IN_CONTEXT: ("accuracy", "top5-acc"),
-  Task.WEBQA: ["accuracy"],
 }
 
 
@@ -167,10 +180,13 @@ def _build_order():
     for task in [Task.CLS, Task.CLS_IN_CONTEXT, Task.DETECTION,
                  Task.VQA, Task.CAPTIONING]:
       dataset_order.append(OpenSceDataset(task, part).get_name())
-  for part in ["val", "test"]:
-    for task in [Task.VQA, Task.CAPTIONING, Task.DETECTION,
-                 Task.CLS, Task.CLS_IN_CONTEXT]:
-      dataset_order.append(GpvDataset(task, part).get_name())
+  for gpv_split in [True, False]:
+    for part in ["val", "test"]:
+      for task in [Task.VQA, Task.CAPTIONING, Task.DETECTION,
+                   Task.CLS, Task.CLS_IN_CONTEXT]:
+        dataset_order.append(GpvDataset(task, part, gpv_split).get_name())
+  for split in ["test", "val"]:
+    dataset_order.append(WebQaDataset(split).get_name())
   return {k: i for i, k in enumerate(dataset_order)}
 
 
@@ -185,7 +201,19 @@ METRIC_ORDER = {k: i for i, k in enumerate([
 ])}
 
 
-def sort_and_remap_keys(keys: List[ResultKey]) -> Dict[ResultKey, str]:
+def _sort_keys(keys: Iterable[ResultKey]):
+  def _order(key: ResultKey):
+    return (
+      DATASET_ORDER.get(key.dataset_name, 1000),
+      key.dataset_name,
+      "" if key.subset_name is None else key.subset_name,
+      METRIC_ORDER.get(key.metric_name, 1000),
+      key.metric_name
+    )
+  return sorted(keys, key=_order)
+
+
+def sort_and_remap_sdout_keys(keys: Iterable[ResultKey]) -> Dict[ResultKey, str]:
   opensce_cap_names = {OpenSceDataset(Task.CAPTIONING, x).get_name() for x in ["val", "test"]}
   out = {}
   for key in keys:
@@ -195,13 +223,82 @@ def sort_and_remap_keys(keys: List[ResultKey]) -> Dict[ResultKey, str]:
     elif key.dataset_name.startswith("opensce") and key.subset_name is not None:
       continue
     else:
-      task_name = key.dataset_name.split("-")[-1]
-      out[key] = f"{task_name}/{key.metric_name}"
+      out[key] = str(key)
 
-  def _order(key):
-    return DATASET_ORDER[key.dataset_name], METRIC_ORDER.get(key.metric_name, 100)
-  keys = sorted(out, key=_order)
-  return {k: out[k] for k in keys}
+  return {k: out[k] for k in _sort_keys(out)}
+
+
+def sort_and_remap_tsv_keys(keys: Iterable[ResultKey]) -> Dict[ResultKey, str]:
+  out = {}
+  keys = sorted(keys, key=lambda x: (
+    x.dataset_name,
+    "" if x.subset_name is None else x.subset_name,
+    x.metric_name
+  ))
+  for k in keys:
+    name = str(k)
+    name = name.replace("-val", "").replace("-test", "")
+    name = name.replace("gpv-", "coco-")
+    name = name.replace("gpvsce", "cocosce")
+    name = name.replace("webqa-v4-basic", "webqa")
+    name = name.replace("accuracy", "acc")
+    out[k] = name
+  return {k: out[k] for k in _sort_keys(out)}
+
+
+def get_hypers(h_name, model_dir):
+  if h_name == "webqa":
+    hyper = {}
+    trainer_data = load_json_object(join(model_dir, "trainer.json"))
+    hyper["epochs"] = str(trainer_data["epochs"])
+    hyper["learning_rate"] = str(trainer_data["optimizer"]["lr"])
+    hyper["batch_size"] = str(trainer_data["train_loader"]["batch_size"])
+
+    model_data = load_json_object(join(model_dir, "model.json"))
+    templates = model_data.get("webqa_templates", "none")
+    if isinstance(templates, str):
+      hyper["webqa_templates7"] = templates
+    else:
+      if 'version' in templates:
+        if templates["version"] != 0:
+          raise ValueError()
+        hyper["webqa_templates"] = "v0"
+      else:
+        assert templates == {'oversample_questions': 3, 'oversample_test': 3}
+        hyper["webqa_templates"] = "v1"
+
+    ds0 = trainer_data["train_datasets"][0]["dataset"]
+    if ds0["type"] != "gpv":
+      raise NotImplementedError()
+    hyper["sce_split"] = "True" if ds0["gpv_split"] else "False"
+
+    ds = trainer_data["train_datasets"][-1]["dataset"]
+    if ds["type"] == "webqa":
+      hyper["qtype"] = ds.get("question_types", "none")
+      builder = trainer_data.get("train_dataset_builder")
+      if builder is not None:
+        if builder["type"] == "partition-web-qa":
+          hyper["part"] = builder["n_partitions"]
+        else:
+          raise NotImplementedError()
+      else:
+        assert ds["type"] == "webqa"
+        assert ds["name"] == "all-v2"
+        hyper["train-sample"] = str(trainer_data["train_datasets"][-1]["train_sample"])
+    return hyper
+  else:
+    raise ValueError()
+
+
+def val_to_str(key: ResultKey, val: float):
+  if val is None:
+    return "-"
+  if isinstance(val, str):
+    return val
+  if "cap" in key.dataset_name:
+    return "%.3f" % val
+  else:
+    return "%.3f" % (100*val)
 
 
 def main():
@@ -215,6 +312,7 @@ def main():
   parser.add_argument("--nocache", action="store_true")
   parser.add_argument("--per_run", action="store_true")
   parser.add_argument("--hyperparameters", choices=["none", "webqa"], default="none")
+  parser.add_argument("--output_tsv")
   args = parser.parse_args()
   py_utils.add_stdout_logger()
 
@@ -227,11 +325,13 @@ def main():
 
   # [model_name, eval_name, run_name, dataset_name] -> prediction dir
   target_files = {}
+  name_to_dataset = {}
   for model_name, (model_dir, runs) in model_dirs.items():
     if model_name == "":
       model_name = dirname(model_dir)
 
     datasets = get_datasets_from_args(args, model_dir, sample=False)
+    name_to_dataset.update({x.get_name(): x for x in datasets})
     prefixes = []
     for dataset in datasets:
       prefix = dataset.get_name()
@@ -255,6 +355,7 @@ def main():
     return
 
   # Get results that are already cached
+  # (model_name, eval_name, run_number, datset_name) -> ResultKey -> value
   results = {}
   if args.cache:
     to_eval = {}
@@ -278,7 +379,6 @@ def main():
     logging.info(f"Evaluating {len(to_eval)} predictions without caching")
 
   cached_datasets = {}
-  name_to_dataset = {x.get_name(): x for x in datasets}
 
   # Evaluate results that are not cached
   for (model_name, eval_name, r_ix, ds_name), eval_dir in to_eval.items():
@@ -310,70 +410,70 @@ def main():
     stats[ResultKey("n", None)] = len(pred)
 
     if args.cache:
-      cache_evaluation(eval_dir, evaluator, stats)
+      cache_evaluation(eval_dir, evaluator, stats, 3)
 
     results[(model_name, eval_name, r_ix, ds_name)] = {replace(k, dataset_name=ds_name): v for k, v in stats.items()}
 
-  per_dataset = defaultdict(lambda: defaultdict(list))
+
+  # Group results by model
+  # (model_name, eval_name, dataset_name) -> run_number -> ResultKey -> value
+  per_dataset = defaultdict(list)
   for (model_name, eval_name, r_ix, ds_name), stats in results.items():
-    per_dataset[ds_name][(model_name, eval_name)].append(stats)
+    per_dataset[(model_name, eval_name, ds_name)].append(stats)
 
-  all_table = defaultdict(dict)
-  per_model_reults  = {}
-  for ds_name, grouped in per_dataset.items():
-    grouped = per_dataset[ds_name]
-    task = name_to_dataset[ds_name].get_task()
-    if task != Task.CAPTIONING:
-      factor = 100
-      val_format = "%.2f"
-    else:
-      val_format = "%.3f"
-      factor = 1
-    
-    for (model_name, eval_name), results in grouped.items():
-      n_runs = len(results)
-      results = py_utils.transpose_list_of_dicts(results)
-      results = {
-        k: np.mean(v)*(1 if k.metric_name == "n" else factor) for k, v
-        in results.items() if (args.show_n or k.metric_name != "n")}
-      all_table[f"{model_name}/{eval_name}"].update({k: val_format % v for k, v in results.items()})
-      if n_runs > 1:
-        results["n-runs"] = n_runs
-      per_model_reults[(model_name, eval_name)] = results
+  # (model_name, eval_name) -> ResultKey -> aggregated value
+  per_model_results = defaultdict(dict)
+  for (model_name, eval_name, ds_name), result_list in per_dataset.items():
+    n_runs = len(result_list)
+    results = py_utils.transpose_list_of_dicts(result_list)
+    results = {
+      k: np.mean(v) for k, v
+      in results.items() if (args.show_n or k.metric_name != "n")}
+    if n_runs > 1:
+      results[ResultKey("n-runs", dataset_name=ds_name)] = n_runs
+    per_model_results[(model_name, eval_name)].update(results)
 
-  all_keys = set()
-  for stats in all_table.values():
-    all_keys.update(stats.keys())
-  remapped_keys = sort_and_remap_keys(list(all_keys))
-  for row_name, row in list(all_table.items()):
-    all_table[row_name] = {name: row[key] for key, name in remapped_keys.items() if key in row}
+  all_keys = set(py_utils.flatten_list(result.keys() for result in per_model_results.values()))
 
+  # model_name -> hyperparameter_key -> value
+  hypers = None
+  hyper_keys = None
   if args.hyperparameters == "webqa":
+    hypers = {}
     model_name_to_model_dir = {k: v[0] for k, v in model_dirs.items()}
-    for model_name, row in all_table.items():
-      hyper = {}
-      key = "/".join(model_name.split("/")[:-1])
-      trainer_data = load_json_object(join(model_name_to_model_dir[key], "trainer.json"))
+    for model_name in set(x[0] for x in per_model_results.keys()):
+      model_dir = model_name_to_model_dir[model_name]
+      hypers[model_name] = get_hypers(args.hyperparameters, model_dir)
+    hyper_keys = set(py_utils.flatten_list(h.keys() for h in hypers.values()))
+  elif args.hyperparameters != "none":
+    raise ValueError(args.hyperparameters)
 
-      ds = trainer_data["train_datasets"][-1]["dataset"]
-      assert ds["type"] == "webqa"
-      hyper["version"] = "v1" if ds["name"] == "all" else "v2"
-      hyper["qtype"] = ds.get("question_types", "none")
-      builder = trainer_data["train_dataset_builder"]
-      if builder is None:
-        hyper["part"] = "1"
-      elif builder["type"] == "partition-web-qa":
-        hyper["part"] = builder["n_partitions"]
-      else:
-        raise NotImplementedError()
-      hyper.update(row)
-      all_table[model_name] = hyper
+  if args.output_tsv:
+    with open(args.output_tsv, "w") as f:
+      key_map = sort_and_remap_tsv_keys(all_keys)
+      header = ["name", "eval_name"] + [str(x) for x in list(key_map.values())]
+      if hypers is not None:
+        header += list(hyper_keys)
+      f.write("\t".join(header))
+      f.write("\n")
+      for (model_name, eval_name), v in per_model_results.items():
+        row = [model_name, eval_name] + [val_to_str(k, v.get(k, "-")) for k in key_map.keys()]
+        if hypers is not None:
+          row += [hypers[model_name].get(key, "0.0") for key in hyper_keys]
+        f.write("\t".join(row))
+        f.write("\n")
 
-
-  print(py_utils.dict_of_dicts_as_table_str(all_table, None, table_format="csv"))
+  remapped_keys = sort_and_remap_sdout_keys(list(all_keys))
+  all_table = {}
+  for (model_name, eval_name), row in per_model_results.items():
+    all_table[model_name + "/" + eval_name] = {name: val_to_str(key, row[key]) for key, name in remapped_keys.items() if key in row}
+  if hypers is not None:
+    for row_name, v in all_table.items():
+      h = hypers["/".join(row_name.split("/")[:-1])]
+      h.update(v)
+      all_table[row_name] = h
+  print(all_table)
   print(py_utils.dict_of_dicts_as_table_str(all_table, None))
-
-
 
 
 if __name__ == '__main__':

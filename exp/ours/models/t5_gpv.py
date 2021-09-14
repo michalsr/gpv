@@ -25,45 +25,6 @@ from torch.nn import functional as F
 from exp.ours.util.to_params import to_params
 
 
-def _fix_old_params(params: Params):
-  if "loss" not in params:
-    params["loss"] = to_params(BasicGPVLoss(
-      1.0, None, None, None, None, None, None, None, sum_seq_tokens=False), GPVLoss)
-
-  if params.pop("aux_obj_cls") is not None:
-    raise ValueError()
-  if not params.pop("image_first"):
-    raise ValueError()
-  if "sort_image_features" in params:
-    if params.pop("sort_image_features") is not None:
-      raise ValueError()
-  if params.pop("use_cached_features"):
-    raise ValueError()
-
-  if "detr_joiner" in params:
-    params["image_joiner"] = params.pop("detr_joiner")
-  else:
-    params["image_joiner"] = dict(
-      type="linear", in_features=2304, out_features=768)
-  freeze = params.pop("freeze_detr")
-  if freeze is True:
-    logging.warning("Freeze set but is not longer supported")
-  params["image_feature_extractor"] = {'type': 'detr'}
-
-
-def _fix_old_state_dict(state_dict: Dict[str, torch.Tensor]):
-  for k in list(state_dict):
-    if k.startswith("detr_joiner."):
-      v = state_dict[k]
-      del state_dict[k]
-      state_dict["image_joiner." + k[len("detr_joiner."):]] = v
-
-    if k.startswith("detr."):
-      v = state_dict[k]
-      del state_dict[k]
-      state_dict["image_feature_extractor." + k] = v
-
-
 @GPVModel.register("t5-gpv")
 class T5GPV(GPVModel):
   IMAGE_SEP = "[IMAGE]"
@@ -75,8 +36,6 @@ class T5GPV(GPVModel):
     **kwargs,
   ):
     # Handle various backwards compatibility issues
-    if "image_feature_extractor" not in params:
-      _fix_old_params(params)
     if "box_aux_loss" in params:
       assert params.pop("box_aux_loss") is None
     if "nms" in params and params["nms"] == 0.0:
@@ -105,7 +64,8 @@ class T5GPV(GPVModel):
       all_lower_case=False,
       relevance_embedding: None=None,
       relevance_conditioning: RelevanceWeighting=None,
-      webqa_templates: Union[str, WebQaQueryGenerator]="v1"
+      webqa_templates: Optional[WebQaQueryGenerator]=None,
+      initialize_from=None
   ):
     super().__init__()
     if nms == 0.0:
@@ -132,6 +92,7 @@ class T5GPV(GPVModel):
     self.webqa_templates = webqa_templates
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
+    self.initialize_from = initialize_from
 
     self.tokenizer = AutoTokenizer.from_pretrained(self.t5_model_name)
 
@@ -139,7 +100,7 @@ class T5GPV(GPVModel):
     self.tokenizer_cache = {}
 
     # Store text->tokens data, mainly used to reduce memory usage so we don't
-    # build new objects for duplicate queries
+    # build new objects for duplicate queries/answers
     self.full_text_cache = {}
 
     if self.image_seperator:
@@ -176,6 +137,12 @@ class T5GPV(GPVModel):
       return out
 
   def initialize(self):
+    if self.initialize_from is not None:
+      logging.info(f"Initializing model from {self.initialize_from}")
+      state_dict = torch.load(self.initialize_from)
+      self.load_state_dict(state_dict)
+      return
+
     if self.initialize_t5:
       logging.info(f"Loading pre-trained LM {self.t5_model_name}")
       self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration.from_pretrained(self.t5_model_name)
@@ -241,9 +208,6 @@ class T5GPV(GPVModel):
       self.model = OurT5ForConditionalGeneration(config)
 
     self._init_non_pretrained()
-
-    if any(k.startswith("detr_joiner.") for k in state_dict):
-      _fix_old_state_dict(state_dict)
 
     super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 

@@ -51,7 +51,10 @@ def get_image_file(image_id):
     return image_file
 
   if isinstance(image_id, str):
-    # TODO we should probably make image_id structured, but for now
+    # TODO we should probably make image_id structured
+    if image_id.startswith("imsitu/"):
+      return join(file_paths.IMSITU_IMAGE_DIR, image_id[len("imsitu/"):])
+
     # select what kind of image based on the fact web images do not have a file ending
     if image_id.endswith(".jpg"):
       return join(file_paths.OPENSCE_IMAGES, image_id)
