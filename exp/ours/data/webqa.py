@@ -105,13 +105,15 @@ class WebQaDataset(Dataset):
     self.sample = sample
     self.split = split
 
+  def get_qtypes_name(self):
+    if len(self.qtypes) == 1:
+      return self.qtypes[0]
+    else:
+      return self.QTYPES_TYPES_TO_NAMES[frozenset(self.qtypes)]
+
   def get_name(self) -> str:
     name = f"webqa-v4-{self.split}"
-    if len(self.qtypes) == 1:
-      name += f"-{self.qtypes[0]}"
-    else:
-      n = self.QTYPES_TYPES_TO_NAMES[frozenset(self.qtypes)]
-      name += f"-{n}"
+    name += f"-{self.get_qtypes_name()}"
     if self.sample is not None:
       name += f"-s{int_to_str(self.sample)}"
     return name
@@ -142,6 +144,8 @@ def _intern(x):
 
 def load_webqa(split, qtypes):
   file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
+
+  prefix = "web" if split == "val" else f"web-{split}"
   logging.info(f"Loading webqa data from {file}")
   raw_instances = load_json_object(file)
   out = []
@@ -167,6 +171,6 @@ def load_webqa(split, qtypes):
     if ex.adj is not None:
       ex_types += [(q, ex.adj) for q in ["1a", "2a"] if q in qtypes]
     for q, ans in ex_types:
-      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"web{i}-{q}"))
+      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}-{q}"))
   return out
 

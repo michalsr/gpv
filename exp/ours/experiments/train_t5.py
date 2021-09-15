@@ -11,8 +11,6 @@ from exp.ours.data.webqa_templates import WebQaQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
-from exp.ours.models.model_utils import BackboneParameterExtractor
-from exp.ours.models.t5_custom import MultiplyRenormalize, MultiplyRenormalizePlattScale
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
@@ -69,7 +67,7 @@ def main():
     image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
     query_box="always",
     all_lower_case=True,
-    webqa_templates=WebQaQueryGenerator(),
+    webqa_templates=WebQaQueryGenerator(use_commands=True),
     initialize_from=args.init_from
   )
 

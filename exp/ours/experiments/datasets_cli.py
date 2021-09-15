@@ -62,7 +62,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=Non
       gpv_tasks.update(GPV1_TASKS)
     elif dataset == "gpv2-eval":
       if trained_on_sce is None:
-        raise ValueError()
+        continue
       part = "test" if trained_on_sce else "val"
       for task in GPV2_TASKS:
         to_show += [GpvDataset(task, part, trained_on_sce, sample)]
