@@ -9,7 +9,6 @@ import h5py
 from exp.ours.boosting import SceUnseenCategories, OpenSceUnseenCategories
 from exp.ours.data.gpv import GpvDataset
 from exp.ours.data.opensce import OpenSceDataset
-from exp.ours.data.webqa import WebQaAnswersBoost
 from exp.ours.eval.eval_predictions import get_evaluator, cache_evaluation
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -42,6 +41,7 @@ class EvaluationConfig(Registrable):
 DEFAULT_MAX_SEQ_LEN = {
   Task.VQA: 20,
   Task.CLS: 8,
+  Task.WEBQA: 8,
   Task.CLS_IN_CONTEXT: 8,
   Task.CAPTIONING: 30
 }

@@ -44,6 +44,9 @@ class T5GPV(GPVModel):
       params["webqa_templates"] = None
     if "relevance_embedding" not in params and "relevance_conditioning" in params:
       params["relevance_embedding"] = params.pop("relevance_conditioning")
+    if "relevance_conditioning" in params:
+      # No longer supported
+      assert params.pop("relevance_conditioning") is None
     return super().from_params(params, **kwargs)
 
   def __init__(
@@ -63,7 +66,6 @@ class T5GPV(GPVModel):
       nms: float=None,
       all_lower_case=False,
       relevance_embedding: None=None,
-      relevance_conditioning=None,
       webqa_templates: Optional[WebQaQueryGenerator]=None,
       initialize_from=None
   ):
@@ -81,7 +83,6 @@ class T5GPV(GPVModel):
     self.t5_model_name = t5_model_name
     self.loss = loss
     self.relevance_embedding = relevance_embedding
-    self.relevance_conditioning = relevance_conditioning
     self.image_feature_extractor = image_feature_extractor
     self.initialize_t5 = initialize_t5
     self.predict_trailing_pad_tokens = predict_trailing_pad_tokens
@@ -170,9 +171,6 @@ class T5GPV(GPVModel):
   def _init_non_pretrained(self):
     t5_dim = self.model.config.d_model
     n_heads = self.model.config.num_heads
-
-    if self.relevance_conditioning is not None:
-      self.model.set_rel_conditioning(self.relevance_conditioning)
 
     if self.image_relevance is None:
       self.obj_cls = nn.Linear(t5_dim, 2)
@@ -317,7 +315,6 @@ class T5GPV(GPVModel):
 
   def _rel_embedding(self, rel, encoder_outputs, image):
     batch_size, seq_len, dim = encoder_outputs.last_hidden_state.size()
-    self.model.set_rel_weights(rel, image.n_boxes)
     if self.relevance_embedding == "embedding-v1":
       rel_probs = rel.softmax(-1)
       rel_probs = F.pad(rel_probs, [0, 0, 0, seq_len-rel_probs.size(1), 0, 0], value=0.0)
