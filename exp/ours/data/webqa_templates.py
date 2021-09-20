@@ -4,7 +4,7 @@ Expanded templates for WebQA
 import logging
 from os.path import dirname, join
 
-from allennlp.common import FromParams
+from allennlp.common import FromParams, Params, Registrable
 
 from utils.io import load_json_object
 
@@ -122,7 +122,48 @@ def get_verb_templates(noun=None):
 ADJ_TYPES = load_json_object(join(dirname(__file__), "webqa_adj_types.json"))
 
 
-class WebQaQueryGenerator(FromParams):
+class WebQaQueryGenerator(Registrable):
+  def get_prompts(self, x, is_train=True):
+    raise ValueError()
+
+
+@WebQaQueryGenerator.register("default")
+class DefaultWebQueryGenerator(WebQaQueryGenerator):
+  DEFAULT_PROMPTS = {
+    "q": 'What is this?',
+    "1n": 'What object is this?',
+    "1v": 'What is this entity doing?',
+    "1a": 'What ADJ_TYPE is this entity?',
+    "2v": 'What is this NOUN doing?',
+    "2a": 'What ADJ_TYPE is this NOUN?',
+  }
+
+  def get_prompts(self, x, is_train=True):
+    prompt = self.DEFAULT_PROMPTS[x.qtype]
+    if "ADJ_TYPE" in prompt:
+      assert x.adj is not None
+      prompt = prompt.replace("ADJ_TYPE", ADJ_TYPES[x.adj])
+    if "NOUN" in prompt:
+      assert x.noun is not None
+      prompt = prompt.replace("NOUN", x.noun)
+    return prompt
+
+
+@WebQaQueryGenerator.register("templated-v1")
+class TemplateWebQueryGenerator(WebQaQueryGenerator):
+
+  @classmethod
+  def from_params(
+      cls,
+      params: Params,
+      constructor_to_call=None,
+      constructor_to_inspect=None,
+      **extras,
+    ):
+      if "type" in params:
+        params = Params({})
+        logging.warning("Loading with older version, templates have changed slighly")
+      return super().from_params(params, constructor_to_call, constructor_to_inspect, **extras)
 
   def __init__(self, oversample_questions=3, oversample_test=3, use_commands=True,
                version=2):

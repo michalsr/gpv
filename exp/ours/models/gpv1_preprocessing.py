@@ -190,6 +190,7 @@ class Gpv1Preprocessor(FromParams):
         example.image_id,
         [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES],
         example.bboxes,
+        relevance_query=example.category,
         query_boxes=all_image_box,
         target_answer=None,
         meta=example.meta if include_meta else None

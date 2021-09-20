@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.util import our_utils, py_utils, image_utils
-from exp.ours.data.dataset import Dataset, Task
+from exp.ours.data.dataset import Dataset, Task, InMemoryDataset
 from exp.ours.train.runner import BeamSearchSpec, save_gpv_output, \
   run, prediction_args_to_json
 from exp.ours.util.to_params import to_params
@@ -90,19 +90,41 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
   logging.info("Setting up...")
   examples = dataset.load()
 
-  if args.max_seq_len:
-    max_seq_len = args.max_seq_len
-  elif task == Task.DETECTION:
-    max_seq_len = None
+  do_rerank = False
+  if args.rank_answer_options == "always":
+    do_rerank = task in {Task.CLS, Task.CLS_IN_CONTEXT}
+  elif args.rank_answer_options == "never":
+    do_rerank = False
+  elif args.rank_answer_options == "non-webqa":
+    if "webqa" not in dataset.get_name():
+      do_rerank = task in {Task.CLS, Task.CLS_IN_CONTEXT}
   else:
-    max_seq_len = DEFAULT_MAX_SEQ_LEN[task]
-    logging.info(f"Defaulting to max_seq_len {max_seq_len} for task {task}")
+    raise NotImplementedError(args.rank_answer_options)
 
-  if max_seq_len is not None:
-    bs = BeamSearchSpec(beam_size=args.beam_size, max_seq_len=max_seq_len)
+  prediction_args = {}
+
+  if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
+    answer_options = dataset.get_answer_options(args.cls_mask == "synonyms")
+    prediction_args["answer_options"] = answer_options
+    logging.info(f"Using classification mask for {len(answer_options)} words")
+
+  if do_rerank:
+    logging.info(f"Re-ranking answer options")
+    prediction_args["rerank_answer_options"] = True
   else:
-    bs = None
-  prediction_args = dict(beam_search_spec=bs)
+    if args.max_seq_len:
+      max_seq_len = args.max_seq_len
+    elif task == Task.DETECTION:
+      max_seq_len = None
+    else:
+      max_seq_len = DEFAULT_MAX_SEQ_LEN[task]
+      logging.info(f"Defaulting to max_seq_len {max_seq_len} for task {task}")
+
+    if max_seq_len is not None:
+      bs = BeamSearchSpec(beam_size=args.beam_size, max_seq_len=max_seq_len)
+    else:
+      bs = None
+    prediction_args["beam_search_spec"] = bs
 
   if args.boost_unseen:
     if isinstance(dataset, GpvDataset):
@@ -115,10 +137,6 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
         prediction_args["mask"] = WebQaAnswersBoost(args.boost_unseen)
     else:
       raise NotImplementedError()
-
-  if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
-    logging.info("Using classification mask")
-    prediction_args["answer_options"] = dataset.get_answer_options(args.cls_mask == "synonyms")
 
   if args.dry_run:
     logging.info("Skipping running the model since this is a dry run")
@@ -137,6 +155,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
       num_workers=args.num_workers,
       predictions_args=prediction_args_to_json(prediction_args),
       dataset=to_params(dataset, Dataset),
+      beams_to_keep=args.beams_to_keep,
       date=datetime.now().strftime("%m%d-%H%M%S"),
     )
 
@@ -184,6 +203,7 @@ def main():
   parser.add_argument("--output_dir")
   parser.add_argument("--output_name")
   parser.add_argument("--dry_run", action="store_true")
+  parser.add_argument("--rank_answer_options", default="non-webqa", choices=["never", "always", "non-webqa"])
   parser.add_argument("--nms", type=float, default=None)
   args = parser.parse_args()
 
@@ -203,7 +223,16 @@ def main():
     if len(models) > 1:
       raise ValueError("Cannot use one output dir if more than one model selected!")
     model = models[0]
+
     datasets = get_datasets_from_args(args, model)
+    # datasets = [
+    #   InMemoryDataset(
+    #     [x for x in OpenSceDataset(Task.CLS, "val").load() if x.image_id == "val/open_images/8a76b44fd8624270.jpg"],
+    #     Task.CLS,
+    #     "dbg",
+    #     OpenSceDataset(Task.CLS, "val").get_answer_options()
+    #   )
+    # ]
     if len(datasets) > 1:
       raise ValueError("Cannot use one output dir if more than one dataset is selected!")
     if len(datasets) == 0:

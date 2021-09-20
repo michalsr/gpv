@@ -7,7 +7,7 @@ import torch.utils.data
 from transformers import AutoConfig
 
 from exp.ours.data.webqa import WebQaDataset
-from exp.ours.data.webqa_templates import WebQaQueryGenerator
+from exp.ours.data.webqa_templates import WebQaQueryGenerator, TemplateWebQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
@@ -67,7 +67,7 @@ def main():
     image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
     query_box="always",
     all_lower_case=True,
-    webqa_templates=WebQaQueryGenerator(use_commands=True),
+    webqa_templates=TemplateWebQueryGenerator(use_commands=True),
     initialize_from=args.init_from
   )
 

@@ -7,7 +7,7 @@ from allennlp.common import Params
 from transformers import AutoTokenizer, AutoConfig
 
 from exp.ours.data.gpv import COCO_CATEGORIES
-from exp.ours.data.webqa_templates import WebQaQueryGenerator
+from exp.ours.data.webqa_templates import WebQaQueryGenerator, DefaultWebQueryGenerator
 from exp.ours.models.model import GPVModel, build_per_example_output
 from exp.ours.models.gpv1_preprocessing import Gpv1Preprocessor
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures
@@ -47,6 +47,14 @@ class T5GPV(GPVModel):
     if "relevance_conditioning" in params:
       # No longer supported
       assert params.pop("relevance_conditioning") is None
+
+    webqa_templates = params["webqa_templates"]
+    if webqa_templates is not None:
+      if "oversample_questions" in webqa_templates:
+        if "type" not in webqa_templates:
+          webqa_templates["type"] = "templated-v1"
+      elif "type" not in webqa_templates:
+        params["webqa_templates"] = None
     return super().from_params(params, **kwargs)
 
   def __init__(
@@ -90,10 +98,13 @@ class T5GPV(GPVModel):
     self.pre_tokenize = pre_tokenize
     self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
-    self.webqa_templates = webqa_templates
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
     self.initialize_from = initialize_from
+
+    if webqa_templates is None:
+      webqa_templates = DefaultWebQueryGenerator()
+    self.webqa_templates = webqa_templates
 
     self.tokenizer = AutoTokenizer.from_pretrained(self.t5_model_name)
 
@@ -121,6 +132,7 @@ class T5GPV(GPVModel):
     self.obj_cls = None
 
     # Prediction arguements
+    self.rerank_answer_options = None
     self.nms = nms
     self.beam_search_spec = None
     self.register_buffer("mask", None)
@@ -248,7 +260,6 @@ class T5GPV(GPVModel):
 
   def _encode(self, image_inputs, input_ids, input_mask):
     image: ImageRegionFeatures = self.image_feature_extractor(**image_inputs)
-
     device = image.features.device
 
     if isinstance(self.image_joiner, Linear):
@@ -361,8 +372,16 @@ class T5GPV(GPVModel):
   def set_prediction_args(
       self,
       beam_search_spec: BeamSearchSpec=None,
-      answer_options=None, mask=None, nms=None
+      answer_options=None, mask=None, nms=None,
+      rerank_answer_options=False
   ):
+    if rerank_answer_options:
+      if answer_options is None:
+        raise ValueError("No answer options to re-rank!")
+      self.rerank_answer_options = answer_options
+    else:
+      self.rerank_answer_options = None
+
     self.beam_search_spec = beam_search_spec
     if nms is not None:
       self.nms = nms
@@ -384,19 +403,32 @@ class T5GPV(GPVModel):
     else:
       self.register_buffer("mask", None, persistent=False)
 
+    self.register_buffer("answer_ids", None)
+
     if answer_options is not None:
-      eos = self.tokenizer.eos_token_id
-      tokenized = [encode_with_cache(x, self.tokenizer, self.tokenizer_cache) + [eos]
-                   for x in answer_options]
-      answer_mask = np.zeros((max(len(x) for x in tokenized), voc_len), dtype=np.bool)
-      for tok in tokenized:
-        answer_mask[np.arange(len(tok)), tok] = True
-      answer_mask = torch.as_tensor(answer_mask, device=device).float()
-      # Word pieces that can never be part of an answer option get a large negative weight
-      answer_mask = (1 - answer_mask) * -1e9
-      if self.mask is not None:
-        answer_mask = answer_mask + self.mask.unsqueeze(0)
-      self.register_buffer("mask", answer_mask)
+      if rerank_answer_options:
+        if beam_search_spec:
+          raise ValueError("No beam search if we just doing re-ranking")
+        tokenized_answers = self.tokenizer(
+          answer_options, return_tensors='pt', padding=True, max_length=self.model.config.n_positions)
+        labels = tokenized_answers["input_ids"].to(device)
+        if not self.predict_trailing_pad_tokens:
+          # -100 marks a label as not a target
+          labels = labels.masked_fill(labels == self.tokenizer.pad_token_id, -100)
+        self.register_buffer("answer_ids", labels, persistent=False)
+      else:
+        eos = self.tokenizer.eos_token_id
+        tokenized = [encode_with_cache(x, self.tokenizer, self.tokenizer_cache) + [eos]
+                     for x in answer_options]
+        answer_mask = np.zeros((max(len(x) for x in tokenized), voc_len), dtype=np.bool)
+        for tok in tokenized:
+          answer_mask[np.arange(len(tok)), tok] = True
+        answer_mask = torch.as_tensor(answer_mask, device=device).float()
+        # Word pieces that can never be part of an answer option get a large negative weight
+        answer_mask = (1 - answer_mask) * -1e9
+        if self.mask is not None:
+          answer_mask = answer_mask + self.mask.unsqueeze(0)
+        self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
       self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels
@@ -429,6 +461,35 @@ class T5GPV(GPVModel):
       for batch in range(len(input_ids)):
         text = [self.post_process_generation(x) for x in input_ids[batch]]
         out_text.append(text)
+
+    elif self.rerank_answer_options:
+      n_answers = len(self.answer_ids)
+      n_queries, enc_len, dim = encoder_outputs.last_hidden_state.size()
+      labels = self.answer_ids.unsqueeze(0).repeat(n_queries, 1, 1).view(n_queries*n_answers, -1)
+      input_mask = input_mask.unsqueeze(1).repeat(1, n_answers, 1).view(n_queries*n_answers, -1)
+      encoder_outputs.last_hidden_state = encoder_outputs.last_hidden_state.unsqueeze(1)\
+        .repeat(1, n_answers, 1, 1).view(n_queries*n_answers, enc_len, dim)
+      t5_out = self.model(
+        encoder_outputs=encoder_outputs,
+        attention_mask=input_mask,
+        labels=labels,
+        return_dict=True,
+      )
+      dec_len = labels.size(1)
+      if self.mask is not None:
+        t5_out.logits = F.log_softmax(t5_out.logits, -1) + self.mask
+      per_answer_loss = F.cross_entropy(
+        t5_out.logits.view(n_queries*n_answers*dec_len, -1),
+        labels.view(n_queries*n_answers*dec_len), reduction="none"
+      ).view(n_queries, n_answers, dec_len)
+      per_answer_loss = per_answer_loss.sum(-1).cpu().numpy()
+      answer_ranks = np.argsort(per_answer_loss, axis=1)
+      out_text = []
+      logprobs = []
+      for batch in range(n_queries):
+        out_text.append([self.rerank_answer_options[r] for r in answer_ranks[batch]])
+        # Negative convert NLL to LL
+        logprobs.append(-per_answer_loss[batch][answer_ranks[batch]])
     else:
       out_text, logprobs = None, None
 
