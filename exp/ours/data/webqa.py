@@ -171,6 +171,6 @@ def load_webqa(split, qtypes):
     if ex.adj is not None:
       ex_types += [(q, ex.adj) for q in ["1a", "2a"] if q in qtypes]
     for q, ans in ex_types:
-      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}-{q}"))
+      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}{i}-{q}"))
   return out
 
