@@ -145,11 +145,19 @@ class CaptioningExample:
     return self.gpv_id
 
 
+@dataclass
+@Dataset.register("in-memory-ds")
 class InMemoryDataset(Dataset):
-  def __init__(self, data, task, name):
-    self.data = data
-    self.task = task
-    self.name = name
+  data: List
+  task: Task
+  name: str
+  answer_options: Optional[Any]
+
+  def to_params(self):
+    return {}
+
+  def get_answer_options(self, synonyms=False):
+    return self.answer_options
 
   def get_task(self) -> Task:
     return self.task
