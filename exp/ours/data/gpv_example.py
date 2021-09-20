@@ -50,6 +50,9 @@ class GPVExample:
   """Optional labels for segmentation tasks"""
   segmentation_label: Optional[SegmentationLabel] = None
 
+  """Query for deciding which boxes are relevant"""
+  relevance_query: Optional[str] = None
+
   """Optional key for grouping examples into batches"""
   sort_len: Optional[int] = None
 
