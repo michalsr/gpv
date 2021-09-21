@@ -143,9 +143,9 @@ class Gpv1Preprocessor(FromParams):
 
   def preprocess_example(self, example, is_train=False, include_query_box=False, include_meta=False):
     if include_query_box:
-      all_image_box = np.array([[0.0, 0.0, 1.0, 1.0]])
+      default_query_box = np.array([[0.0, 0.0, 1.0, 1.0]])
     else:
-      all_image_box = None
+      default_query_box = None
 
     # TODO ideally normalize boxes here too
     if isinstance(example, CaptioningExample):
@@ -158,7 +158,7 @@ class Gpv1Preprocessor(FromParams):
             example.image_id,
             self.caption_queries_tok,
             None,
-            query_boxes=all_image_box,
+            query_boxes=default_query_box,
             target_answer=[self.preprocess_text(cap.caption)],
             meta=cap.meta if include_meta else None
           ))
@@ -169,7 +169,7 @@ class Gpv1Preprocessor(FromParams):
           example.image_id,
           self.caption_queries_tok,
           None,
-          query_boxes=all_image_box,
+          query_boxes=default_query_box,
           target_answer=[self.preprocess_text(x.caption) for x in example.captions if x.caption is not None],
           meta=example.meta if include_meta else None
         )]
@@ -191,7 +191,7 @@ class Gpv1Preprocessor(FromParams):
         [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES],
         example.bboxes,
         relevance_query=example.category,
-        query_boxes=all_image_box,
+        query_boxes=default_query_box,
         target_answer=None,
         meta=example.meta if include_meta else None
       )]
@@ -205,7 +205,7 @@ class Gpv1Preprocessor(FromParams):
         Task.VQA,
         example.image_id,
         [self.preprocess_text(example.question)],
-        query_boxes=all_image_box,
+        query_boxes=default_query_box,
         target_answer=None if answer is None else self.preprocess_text(answer),
         meta=example.meta if include_meta else None
       )]
@@ -224,7 +224,8 @@ class Gpv1Preprocessor(FromParams):
         example,
         query=[self.preprocess_text(example.query)],
         target_answer=None if example.target_answer is None else self.preprocess_text(example.target_answer),
-        meta=None if include_meta else example.meta
+        meta=None if include_meta else example.meta,
+        query_boxes=default_query_box
       )]
     elif isinstance(example, ClsExample):
       out = [GPVExample(
@@ -233,7 +234,7 @@ class Gpv1Preprocessor(FromParams):
         example.image_id,
         self.cls_queries_tok,
         None,
-        query_boxes=all_image_box if example.query_box is None else np.array([example.query_box]),
+        query_boxes=default_query_box if example.query_box is None else np.array([example.query_box]),
         crop=example.crop,
         target_answer=self.preprocess_text(example.category),
         meta=example.meta if include_meta else None

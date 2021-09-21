@@ -169,7 +169,16 @@ def load_image_ndarray(image_id, image_size=None, crop=None) -> Tuple[np.ndarray
   return img, original_image_size
 
 
-def get_hdf5_image_file(name):
+def get_hdf5_image_file(dataset_name, features_name):
   if not exists(file_paths.PRECOMPUTED_FEATURES_DIR):
     mkdir(file_paths.PRECOMPUTED_FEATURES_DIR)
-  return join(file_paths.PRECOMPUTED_FEATURES_DIR, name + ".hdf5")
+  return join(file_paths.PRECOMPUTED_FEATURES_DIR, dataset_name, features_name + ".hdf5")
+
+
+def get_hdf5_files(feature_name):
+  files = []
+  for dataset_dir in listdir(file_paths.PRECOMPUTED_FEATURES_DIR):
+    f = join(file_paths.PRECOMPUTED_FEATURES_DIR, dataset_dir, feature_name+".hdf5")
+    if exists(f):
+      files.append(f)
+  return files

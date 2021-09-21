@@ -1,6 +1,6 @@
 import logging
 from contextlib import ExitStack
-from os.path import join
+from os.path import join, exists
 from typing import List, Dict, Any, Tuple, Optional, NewType
 
 import logging
@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 import torch
 import torchvision
-from allennlp.common import Registrable
+from allennlp.common import Registrable, Params
 from dataclasses import dataclass, replace
 from torch import nn
 from torchvision.transforms.functional import hflip
@@ -619,6 +619,23 @@ class Hdf5FeatureExtractorCollate(ImageCollater):
 class Hdf5FeatureExtractor(ImageFeatureExtractor):
   """Loadings features from HDF5"""
 
+  @classmethod
+  def from_params(
+        cls,
+        params: Params,
+        **extras,
+    ):
+
+    # older version of this class stored a list of file, see if we can
+    # convert
+    source = params["source"]
+    if isinstance(source, list):
+      if all(x.endswith("vinvl") for x in source):
+        params["source"] = "vinvl"
+      else:
+        raise NotImplementedError(source)
+    return super().from_params(params, **extras)
+
   def __init__(self, source, box_format=None, box_embedder: Layer=None):
     super().__init__()
     self.box_embedder = box_embedder
@@ -626,28 +643,24 @@ class Hdf5FeatureExtractor(ImageFeatureExtractor):
     self.box_format = box_format
 
     # Look up some meta-data in the hdf5 file
+    sources = image_utils.get_hdf5_files(source)
+    logging.info(f"Found {len(sources)} feature files for {self.source}: {sources}")
     if self.box_format is None:
-      if isinstance(source, str):
-        src = image_utils.get_hdf5_image_file(self.source)
+      _box_formats = []
+      for src in sources:
         with h5py.File(src, "r") as f:
-            self._box_format = f["box_format"][()]
-      else:
-        _box_formats = []
-        for src in self.source:
-          with h5py.File(image_utils.get_hdf5_image_file(src), "r") as f:
-            _box_formats.append(f["box_format"][()])
-        assert all(_box_formats[0] == x for x in _box_formats[1:])
-        self.box_format = _box_formats[0]
+          _box_formats.append(f["box_format"][()])
+      assert all(_box_formats[0] == x for x in _box_formats[1:])
+      self.box_format = _box_formats[0]
     else:
       self._box_format = self.box_format
 
   def get_collate(self, is_train=False) -> 'ImageCollater':
-    if isinstance(self.source, str):
-      return Hdf5FeatureExtractorCollate(
-        image_utils.get_hdf5_image_file(self.source), self._box_format)
+    sources = image_utils.get_hdf5_files(self.source)
+    if len(sources) == 1:
+      return Hdf5FeatureExtractorCollate(sources[0], self._box_format)
     else:
-      files = [image_utils.get_hdf5_image_file(x) for x in self.source]
-      return MultiHdf5FeatureExtractorCollate(files, self.box_format)
+      return MultiHdf5FeatureExtractorCollate(sources, self.box_format)
 
   def forward(self, features) -> ImageRegionFeatures:
     if self.box_embedder:
