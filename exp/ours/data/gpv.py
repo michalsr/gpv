@@ -21,7 +21,7 @@ COCO_CATEGORIES = list(COCO_ID_TO_CATEGORY.values())
 COCO_CATEGORIES_TO_ID = {k: i for i, k in enumerate(COCO_CATEGORIES)}
 
 
-def load_instances(kind, split, gpv_split=True) -> List[Dict]:
+def load_instances(kind, split, gpv_split=True,unseen_split=False) -> List[Dict]:
   """Loads GPV-I in list-of-dictionary format"""
 
   if kind == "cls":
@@ -38,19 +38,21 @@ def load_instances(kind, split, gpv_split=True) -> List[Dict]:
     raise NotImplementedError(kind)
   if ds == "web_80":
     split_txt = ""
-  elif gpv_split:
-    split_txt = "gpv_split"
-  else:
-    split_txt = "original_split"
+ 
+  split_txt = "gpv_split"
+  # elif unseen_split==True:
+  #   split_txt = "held_out_all"
+  # else:
+  #   split_txt = "original_split"
   target_file = join(file_paths.SOURCE_DIR, ds, split_txt, f"{split}.json")
   logging.info(f"Loading instances from {target_file}")
   return load_json_object(target_file)
 
 
-def load_gpv_boxes(split, gpv_split) -> List[LocalizationExample]:
+def load_gpv_boxes(split, gpv_split,unseen_split) -> List[LocalizationExample]:
   """Load GPV-I detection data"""
 
-  raw_instances = load_instances("detection", split, gpv_split)
+  raw_instances = load_instances("detection", split, gpv_split,unseen_split)
   out = []
   for x in raw_instances:
     if "coco_categories" in x:
@@ -76,10 +78,10 @@ def load_gpv_boxes(split, gpv_split) -> List[LocalizationExample]:
   return out
 
 
-def load_gpv_vqa(split, gpv_split) -> List[VqaExample]:
+def load_gpv_vqa(split, gpv_split,unseen_split) -> List[VqaExample]:
   """Load GPV-I VQA data"""
 
-  raw_instances = load_instances("vqa", split, gpv_split)
+  raw_instances = load_instances("vqa", split, gpv_split,unseen_split)
   out = []
   for x in raw_instances:
     cats = x.get("coco_categories")
@@ -100,10 +102,10 @@ def load_gpv_vqa(split, gpv_split) -> List[VqaExample]:
   return out
 
 
-def load_gpv_captioning(split, gpv_split) -> List[CaptioningExample]:
+def load_gpv_captioning(split, gpv_split,unseen_split) -> List[CaptioningExample]:
   """Load GPV-I captioning data"""
 
-  raw_instances = load_instances("cap", split, gpv_split)
+  raw_instances = load_instances("cap", split, gpv_split,unseen_split)
   grouped_by_image = defaultdict(list)
   for i, x in enumerate(raw_instances):
     meta = {}
@@ -132,15 +134,15 @@ def load_gpv_captioning(split, gpv_split) -> List[CaptioningExample]:
   return out
 
 
-def load_gpv_cls(split, gpv_split) -> List[ClsExample]:
-  return _load_gpv_cls(split, gpv_split, False)
+def load_gpv_cls(split, gpv_split,unseen_split) -> List[ClsExample]:
+  return _load_gpv_cls(split, gpv_split,unseen_split, False)
 
 
-def load_gpv_ident(split, gpv_split) -> List[ClsExample]:
-  return _load_gpv_cls(split, gpv_split, True)
+def load_gpv_ident(split, gpv_split,unseen_split) -> List[ClsExample]:
+  return _load_gpv_cls(split, gpv_split, unseen_split,True)
 
 
-def _load_gpv_cls(split, gpv_split, in_context=False) -> List:
+def _load_gpv_cls(split, gpv_split, unseen_split,in_context=False) -> List:
   """Load GPV-I CLS data"""
   if in_context:
     def fn(i, image_id, category_id, box, meta):
@@ -155,7 +157,7 @@ def _load_gpv_cls(split, gpv_split, in_context=False) -> List:
         f"coco-box{i}", Task.CLS, image_id,
         COCO_ID_TO_CATEGORY[category_id], crop=box, meta=meta)
 
-  raw_instances = load_instances("cls", split, gpv_split)
+  raw_instances = load_instances("cls", split, gpv_split,unseen_split)
   out = []
   for x in raw_instances:
     cats = x.get("coco_categories")
@@ -194,8 +196,8 @@ GPV_KINDS = {
 }
 
 
-def load_gpv_instances(kind, split, gpv_split):
-  return GPV_KINDS[kind](split, gpv_split)
+def load_gpv_instances(kind, split, gpv_split,unseen_split):
+  return GPV_KINDS[kind](split, gpv_split,unseen_split)
 
 
 def split_seen_unseen(instances):
@@ -249,7 +251,7 @@ class GpvDataset(Dataset):
 
   def __init__(self, task: Task, split: str, gpv_split=True,
                sample=None, seen_sample=None, unseen_sample=None,
-               per_example_captions=False):
+               per_example_captions=False,unseen_split=False):
     if split not in {"test", "val", "train"}:
       raise ValueError(split)
     if sample is not None and (seen_sample is not None or unseen_sample is not None):
@@ -261,6 +263,7 @@ class GpvDataset(Dataset):
     self.seen_sample = seen_sample
     self.unseen_sample = unseen_sample
     self.per_example_captions = per_example_captions
+    self.unseen_split = unseen_split 
 
   def get_name(self):
     kind = "gpvsce" if self.gpv_split else "gpv"
@@ -282,7 +285,7 @@ class GpvDataset(Dataset):
     return CocoCategories(synonyms)
 
   def load(self):
-    instances = self.KINDS[self.task](self.split, self.gpv_split)
+    instances = self.KINDS[self.task](self.split, self.gpv_split,self.unseen_split)
     if self.per_example_captions and self.task == Task.CAPTIONING:
       per_ex = []
       for instance in instances:
