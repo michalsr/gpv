@@ -27,7 +27,7 @@ class GPVExample:
   id: str
 
   """Task this example if for"""
-  task: Task
+  task: Optional[Task]
 
   """Image this is for"""
   image_id: Union[str, int]
