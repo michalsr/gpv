@@ -146,7 +146,7 @@ class DefaultWebQueryGenerator(WebQaQueryGenerator):
     if "NOUN" in prompt:
       assert x.noun is not None
       prompt = prompt.replace("NOUN", x.noun)
-    return prompt
+    return [prompt]
 
 
 @WebQaQueryGenerator.register("templated-v1")
