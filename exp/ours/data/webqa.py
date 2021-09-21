@@ -112,8 +112,9 @@ class WebQaDataset(Dataset):
       return self.QTYPES_TYPES_TO_NAMES[frozenset(self.qtypes)]
 
   def get_name(self) -> str:
-    name = f"webqa-v4-{self.split}"
+    name = f"webqa-v4"
     name += f"-{self.get_qtypes_name()}"
+    name += f"-{self.split}"
     if self.sample is not None:
       name += f"-s{int_to_str(self.sample)}"
     return name
