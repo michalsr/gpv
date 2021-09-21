@@ -404,13 +404,25 @@ class Trainer(FromParams):
 
   def _get_train_loader(self, model: GPVModel, training_examples: List[List],
                         runtime: RunArgs):
+    id_sets = set()
     all_train = []
+ 
+      
     for grp in training_examples:
       all_train.append(py_utils.flatten_list(model.preprocess_example_train(x) for x in grp))
     all_train_sizes = [len(x) for x in all_train]
-    all_train = py_utils.flatten_list(all_train)
 
+    all_train = py_utils.flatten_list(all_train)
+    for x in all_train:
+
+      if x.id in id_sets:
+        print(x.id)
+      
+      else:
+        id_sets.add(x.id)
     if len(set(x.id for x in all_train)) != len(all_train):
+      print(len(all_train))
+      print(len(set(x.id for x in all_train)))
       raise ValueError("Repeated IDs in train")
 
     shuffle = True
@@ -660,7 +672,9 @@ class Trainer(FromParams):
 
   def _load_and_log_train(self):
     """Load the training and log dataset sizes"""
+
     training_examples = [x.dataset.load() for x in self.train_datasets]
+
     total = sum(len(x) for x in training_examples)
 
     logging.info(f"Have {total} train examples")

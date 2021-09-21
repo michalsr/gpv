@@ -1,6 +1,6 @@
 from os.path import join, dirname
 
-DATA_DIR = "/Users/chris/data/"
+DATA_DIR = "/data/michal5/"
 
 FASTER_RCNN_SOURCE = join(DATA_DIR, "faster-rcnn", "trainval_resnet101_faster_rcnn_genome_36.tsv")
 VINVL_SOURCE = join(DATA_DIR, "vinvl")
@@ -16,9 +16,10 @@ TORCHVISION_CACHE_DIR = join(DATA_DIR, "torchvision-cache")
 
 WEB_IMAGES_DIR = join(DATA_DIR, "ai2-prior-gpv1web-bing/images")
 
-CACHE_DIR = join(dirname(dirname(dirname(__file__))), "data-cache")
+#CACHE_DIR = join(dirname(dirname(dirname(__file__))), "data-cache")
 # CACHE_DIR = "/home/amitak/gpv-2/gpv/data-cache"
-PRECOMPUTED_FEATURES_DIR = join(CACHE_DIR, "precomputed-features/coco")
+CACHE_DIR = "/shared/rsaas/zhenzh4/code/gpv/data-cache"
+PRECOMPUTED_FEATURES_DIR = "/shared/rsaas/zhenzhu4/code/gpv/data-cache/precomputed-features/"
 WEBQA_ALL_FIFTH_ANSWERS = join(CACHE_DIR, "webqa_fifth_answers.json")
 
 GPV_DIR = join(DATA_DIR, "gpv")
