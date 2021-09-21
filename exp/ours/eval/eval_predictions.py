@@ -249,6 +249,7 @@ def sort_and_remap_tsv_keys(keys: Iterable[ResultKey]) -> Dict[ResultKey, str]:
     "" if x.subset_name is None else x.subset_name,
     x.metric_name
   ))
+  cur_names = set()
   for k in keys:
     name = str(k)
     name = name.replace("-val", "").replace("-test", "")
@@ -256,6 +257,9 @@ def sort_and_remap_tsv_keys(keys: Iterable[ResultKey]) -> Dict[ResultKey, str]:
     name = name.replace("gpvsce", "cocosce")
     name = name.replace("webqa-v4-basic", "webqa")
     name = name.replace("accuracy", "acc")
+    if name in cur_names:
+      raise ValueError(f"TSV naming error {name} for {str(k)}")
+    cur_names.add(name)
     out[k] = name
   return {k: out[k] for k in _sort_keys(out)}
 
@@ -366,9 +370,9 @@ def main():
     for r_ix, run in enumerate(runs):
       for prefix, dataset_name in prefixes:
         model_files = find_eval_files(run, prefix)
-        if len(model_files) == 0 and prefix.startswith("webqa-v4-val-basic--"):
+        if len(model_files) == 0 and prefix.startswith("webqa-v4-basic-val--"):
           # Backwards compatiblity fix
-          model_files = find_eval_files(run, prefix.replace("webqa-v4-val-basic", "webqa-all-v2-val"))
+          model_files = find_eval_files(run, prefix.replace("webqa-v4-basic-val", "webqa-all-v2-val"))
           if len(model_files) > 0:
             logging.warn(f"Using old webqa results for {run}")
 
@@ -444,7 +448,6 @@ def main():
 
     results[(model_name, eval_name, r_ix, ds_name)] = {replace(k, dataset_name=ds_name): v for k, v in stats.items()}
 
-
   # Group results by model
   # (model_name, eval_name, dataset_name) -> run_number -> ResultKey -> value
   per_dataset = defaultdict(list)
@@ -479,14 +482,23 @@ def main():
     raise ValueError(args.hyperparameters)
 
   if args.output_tsv:
+    tsv_results = dict(per_model_results)
+    for k, v in tsv_results.items():
+      # Fix mis-named dataset
+      for key, r in list(v.items()):
+        if key.dataset_name == "webqa-all-v2-val":
+          del v[key]
+          v[replace(key, dataset_name="webqa-v4-basic-val")] = r
+    tsv_keys = set(py_utils.flatten_list(result.keys() for result in tsv_results.values()))
+
     with open(args.output_tsv, "w") as f:
-      key_map = sort_and_remap_tsv_keys(all_keys)
+      key_map = sort_and_remap_tsv_keys(tsv_keys)
       header = ["name", "eval_name"] + [str(x) for x in list(key_map.values())]
       if hypers is not None:
         header += list(hyper_keys)
       f.write("\t".join(header))
       f.write("\n")
-      for (model_name, eval_name), v in per_model_results.items():
+      for (model_name, eval_name), v in tsv_results.items():
         row = [model_name, eval_name] + [val_to_str(k, v.get(k, "-")) for k in key_map.keys()]
         if hypers is not None:
           row += [hypers[model_name].get(key, "-") for key in hyper_keys]
