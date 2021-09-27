@@ -27,7 +27,6 @@ from exp.ours.util.to_params import to_params
 
 @GPVModel.register("t5-gpv")
 class T5GPV(GPVModel):
-  IMAGE_SEP = "[IMAGE]"
 
   @classmethod
   def from_params(
@@ -38,6 +37,9 @@ class T5GPV(GPVModel):
     # Handle various backwards compatibility issues
     if "box_aux_loss" in params:
       assert params.pop("box_aux_loss") is None
+    if "image_seperator" in params:
+      assert not params.pop("image_seperator")
+
     if "nms" in params and params["nms"] == 0.0:
       params["nms"] = None
     if "webqa_templates" not in params:
@@ -68,14 +70,13 @@ class T5GPV(GPVModel):
       query_box=None,
       predict_trailing_pad_tokens=False,
       image_positional_bias="zero",
-      image_seperator=False,
       freeze_embed=False,
       initialize_joiner="coco",
       nms: float=None,
       all_lower_case=False,
-      relevance_embedding: None=None,
+      relevance_embedding: Optional[str]=None,
       webqa_templates: Optional[WebQaQueryGenerator]=None,
-      initialize_from=None
+      initialize_from=None,
   ):
     super().__init__()
     if nms == 0.0:
@@ -83,7 +84,7 @@ class T5GPV(GPVModel):
       # threshold and some old code conflated nms=0.0 with nms=None so we disallow nms=0.0 here
       # so we can treat 0.0 as None when loading this from a parameter file.
       raise ValueError("Need nms > 0.0")
-    if freeze_embed and image_seperator:
+    if freeze_embed:
       raise NotImplementedError()
     self.all_lower_case = all_lower_case
     self.image_relevance = image_relevance
@@ -96,7 +97,6 @@ class T5GPV(GPVModel):
     self.predict_trailing_pad_tokens = predict_trailing_pad_tokens
     self.image_positional_bias = image_positional_bias
     self.pre_tokenize = pre_tokenize
-    self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
@@ -114,14 +114,6 @@ class T5GPV(GPVModel):
     # Store text->tokens data, mainly used to reduce memory usage so we don't
     # build new objects for duplicate queries/answers
     self.full_text_cache = {}
-
-    if self.image_seperator:
-      self.tokenizer.add_tokens([self.IMAGE_SEP])
-      image_sep_id = self.tokenizer.convert_tokens_to_ids([self.IMAGE_SEP])
-      assert len(image_sep_id) == 1
-      self._image_sep_id = image_sep_id[0]
-    else:
-      self._image_sep_id = None
 
     self.image_joiner = image_joiner
 
@@ -158,7 +150,8 @@ class T5GPV(GPVModel):
 
     if self.initialize_t5:
       logging.info(f"Loading pre-trained LM {self.t5_model_name}")
-      self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration.from_pretrained(self.t5_model_name)
+      self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration.\
+        from_pretrained(self.t5_model_name)
     else:
       config = AutoConfig.from_pretrained(self.t5_model_name)
       self.model = OurT5ForConditionalGeneration(config)
@@ -260,6 +253,7 @@ class T5GPV(GPVModel):
 
   def _encode(self, image_inputs, input_ids, input_mask):
     image: ImageRegionFeatures = self.image_feature_extractor(**image_inputs)
+
     device = image.features.device
 
     if isinstance(self.image_joiner, Linear):
@@ -279,13 +273,6 @@ class T5GPV(GPVModel):
       pass
     else:
       raise NotImplementedError(self.query_box)
-
-    if self.image_seperator:
-      input_ids = torch.cat([
-        input_ids,
-        torch.full_like(input_ids[:, :1], self._image_sep_id),
-      ], 1)
-      input_mask = torch.cat([input_mask[:, :1], input_mask], 1)
 
     query_embed = self.model.shared(input_ids)
 
@@ -431,8 +418,13 @@ class T5GPV(GPVModel):
         self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
-      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels
-  ):
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels):
+    # Use no_grad just so clients don't have to remember to
+    with torch.no_grad():
+      return self._predict(image_inputs, input_ids, input_mask, labels)
+
+  def _predict(
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels):
     task = labels.tasks[0]
     if not all(x == task for x in labels.tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
