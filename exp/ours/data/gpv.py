@@ -39,7 +39,7 @@ def load_instances(kind, split, gpv_split=True,unseen_split=False) -> List[Dict]
   if ds == "web_80":
     split_txt = ""
  
-  split_txt = "gpv_split"
+  split_txt = "held_out_all"
   # elif unseen_split==True:
   #   split_txt = "held_out_all"
   # else:

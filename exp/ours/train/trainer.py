@@ -8,7 +8,6 @@ from collections import defaultdict, Counter
 from datetime import datetime
 from os import mkdir, makedirs, getpid
 from time import perf_counter
-
 import h5py
 import torch
 from numbers import Number
@@ -23,7 +22,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from torch import distributed as dist
-
+from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
+from exp.ours.train import evaluator
 from exp.ours import file_paths
 from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler
 from exp.ours.util import our_utils, py_utils, image_utils
@@ -38,8 +38,83 @@ from exp.ours.train.evaluator import ResultKey, CaptionEvaluator, Evaluator
 from exp.ours.train.optimizer_builder import OptimizerBuilder, TrainingScheduleBuilder
 from utils.io import dump_json_object, load_json_object
 import numpy as np
+from exp.ours.data.dataset import GPV1_TASKS, GPV2_TASKS, Task
+from exp.ours.data.gpv import GpvDataset, CocoCategories
 
+def get_datasets():
+  tasks = {}  # Use a dictionary to preserve ordering
+  tasks.update({x: None for x in GPV2_TASKS})
+  train_datasets = []
+  eval_datasets = []
+  for task in tasks:
+    train_datasets.append(TrainerDataset(GpvDataset(task, "train", True,unseen_split=True), str(task) + "-tr"))
+    eval_datasets.append(TrainerDataset(GpvDataset(task, "val", True,unseen_split=True), str(task) + "-val"))
 
+  best_model_key = [
+    evaluator.ResultKey("accuracy", dataset_name="cls-val"),
+    evaluator.ResultKey("accuracy", dataset_name="cic-val"),
+    evaluator.ResultKey("score", dataset_name="vqa-val"),
+    evaluator.ResultKey("cider", dataset_name="cap-val"),
+    evaluator.ResultKey("AP", dataset_name="det-val"),
+    evaluator.ResultKey("accuracy", dataset_name="webqa-val"),
+  ]
+  best_model_key = [x for x in best_model_key if any(x.dataset_name.startswith(str(t)) for t in tasks)]
+  for x in train_datasets:
+      if x.dataset.get_task() == Task.CAPTIONING:
+        x.eval_sample = 5000
+      else:
+        x.eval_sample = 8000
+  for x in eval_datasets:
+      if x.dataset.get_task() == Task.CAPTIONING:
+        x.eval_sample = 8000
+      else:
+        x.eval_sample = 12000
+
+  evaluation = {
+    Task.VQA: EvaluationSetup(
+      evaluator.VqaEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 10))
+    ),
+    Task.CAPTIONING: EvaluationSetup(
+      evaluator.CaptionEvaluator(per_caption=True),
+      dict(beam_search_spec=BeamSearchSpec(1, 30))
+    ),
+    Task.DETECTION: EvaluationSetup(
+      evaluator.LocalizationEvaluator(),
+      dict(beam_search_spec=None)
+    ),
+    Task.CLS: EvaluationSetup(
+      evaluator.ClsEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=CocoCategories())
+    ),
+    Task.CLS_IN_CONTEXT: EvaluationSetup(
+      evaluator.ClsEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=CocoCategories())
+    ),
+  }
+  other_log = {}
+  evals = [(x, True) for x in train_datasets] + [(x, False) for x in eval_datasets]
+  for ds, is_train in evals:
+    task = ds.dataset.get_task()
+    if task == Task.CAPTIONING:
+      metric_name, name = "cider", "cider"
+      k = evaluator.ResultKey(metric_name="bleu4", dataset_name=ds.get_name())
+      other_log[k] = "bleu4"
+    elif task == Task.CLS:
+      metric_name, name = "accuracy", "cls"
+    elif task == Task.VQA:
+      metric_name, name = "score", "vqa"
+    elif task == Task.DETECTION:
+      metric_name, name = "AP", "loc"
+    elif task == Task.CLS_IN_CONTEXT:
+      metric_name, name = "accuracy", "ident"
+    elif task == Task.WEBQA:
+      metric_name, name = "accuracy", "webqa"
+    else:
+      raise RuntimeError()
+    name = f"train-evals/{name}" if is_train else f"val-evals/{name}"
+    other_log[evaluator.ResultKey(metric_name=metric_name, dataset_name=ds.get_name())] = name
+  return train_datasets, eval_datasets, evaluation,other_log
 @dataclass
 class EvaluationSetup(FromParams):
   """Specifies how to evaluate a task"""
@@ -298,8 +373,13 @@ class Trainer(FromParams):
     with py_utils.DisableLogging():
       trainer = Trainer.from_params(Params.from_file(join(output_dir, "trainer.json")))
     model_file = join(output_dir, "model.json")
-
+    train_datasets, eval_datasets, evaluation,other_log = get_datasets()
+    trainer.train_datasets = train_datasets
+    trainer.eval_datasets = eval_datasets
+    trainer.evaluation = evaluation
+    trainer.train_val_log = list(other_log.items())
     checkpoint_file = join(run_dir, "checkpoint.pth")
+
     run_args = RunArgs.build(device)
     if not save:
       logging.info("Save is false, so no results will be recorded")

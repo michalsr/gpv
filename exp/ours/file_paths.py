@@ -18,8 +18,8 @@ WEB_IMAGES_DIR = join(DATA_DIR, "ai2-prior-gpv1web-bing/images")
 
 #CACHE_DIR = join(dirname(dirname(dirname(__file__))), "data-cache")
 # CACHE_DIR = "/home/amitak/gpv-2/gpv/data-cache"
-CACHE_DIR = "/shared/rsaas/zhenzh4/code/gpv/data-cache"
-PRECOMPUTED_FEATURES_DIR = "/shared/rsaas/zhenzhu4/code/gpv/data-cache/precomputed-features/"
+CACHE_DIR = "/data/michal5/gpv/data-cache"
+PRECOMPUTED_FEATURES_DIR = "/data/michal5/gpv/data-cache/precomputed-features/"
 WEBQA_ALL_FIFTH_ANSWERS = join(CACHE_DIR, "webqa_fifth_answers.json")
 
 GPV_DIR = join(DATA_DIR, "gpv")
