@@ -176,7 +176,6 @@ class ImageCollateWithBoxes(ImageCollater):
   horizontal_flip_tasks: Any
   return_objectness: bool
   cached_bboxes: Dict
-  dbg: bool = False
   hdf5_box_format: str = None
 
   def __post_init__(self):
@@ -213,15 +212,8 @@ class ImageCollateWithBoxes(ImageCollater):
       else:
         trans = self.eval_transform
 
-      if self.dbg:
-        img, size = image_utils.load_image_ndarray(image_utils.DUMMY_IMAGE_ID, self.image_size)
-        img = img.transpose(2, 0, 1)
-        img = torch.as_tensor(img, dtype=torch.float)
-        # img, size = image_utils.load_image_ndarray(image_utils.DUMMY_IMAGE_ID, self.image_size, as_int8=False)
-        # image_tensors.append(trans(img))
-      else:
-        img, size = image_utils.load_image_data(example, self.image_size)
-        img = trans(img)
+      img, size = image_utils.load_image_data(example, self.image_size)
+      img = trans(img)
 
       if (
           self.is_train and
@@ -564,6 +556,17 @@ class Hdf5FeatureExtractorCollate(ImageCollater):
     image_sizes = []
     with h5py.File(self.source_file, "r") as f:
       for ex in batch:
+
+        if hasattr(ex.image_id, "load_vinvl_features"):
+          # A bit of a hack, but we let some examples short-cut the usual loading
+          # processing by having an image_id object rather than a image_id string
+          assert ex.query_boxes is None
+          f, b, o = ex.image_id.load_vinvl_features()
+          features.append(f)
+          objectness.append(o)
+          boxes.append(b)
+          continue
+
         grp = f[image_utils.get_cropped_img_key(ex.image_id, ex.crop)]
 
         if ex.target_boxes is not None:

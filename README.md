@@ -48,6 +48,37 @@ The web and OpenSCE dataset need to be downloaded manually at the moment.
 The paths in exp/ours/file_paths.py need to be modified to point to the correct locations, it
 should not need to be changed if you used the default paths in setput_data.sh.
 
+# Precomputing features for new images
+If you want to run the model on a new dataset, you will need to pre-computed the image features
+for that dataset. There are three steps to doing this:
+
+1. Gather your images into one directory, it may include subdirectories, but it should not contain any
+  files other than images.
+2. Run: 
+      
+    ```
+    python exp/ours/image_featurizer/precompute_image_features.py /path/to/image_directory your_dataset_name vinvl.hdf5
+    ```
+    where `/path/to/image_directory` should point to your image directory and `your_dataset_name` should
+    be a name for the set of images you are adding. The script has parameters to control the batch size and run across multiple devices 
+    which can be used to tune the process. This will 
+    produce the hdf5 file vinvl.hdf5.
+
+3. Move the hdf5 file to `file_paths.PRECOMPUTED_FEATURES_DIR` under a directory with the name our 
+    your dataset. For example:
+   
+    ```
+    mkdir data-cache/precomputed-features/your_dataset_name
+    mv vinvl.hdf5 data-cache/precomputed-features/your_dataset_name/
+    ```
+
+Now the model will support image_ids with the format of `your_dataset_name/path/to/image_file/in/your/directory`. 
+For example, if your directory contained the 
+image val/dog/001.jpg and your dataset_name was "pets", the image_id "pets/val/001.jpg" will
+now be recognized by the model and load the pre-computed features for that image. Image ids of that format 
+can now be passed to`run_on_image_id.py` or used in `GPVExample` objects with VinVL models.
+
+
 # Training
 The repo is currently setup to train the basic model on COCO data, optionally with
 the addition of web data.

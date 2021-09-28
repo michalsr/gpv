@@ -44,6 +44,7 @@ _IMAGE_ID_TO_FILE_MAP = None
 
 def get_image_file(image_id):
   if isinstance(image_id, dict):
+    # Legacy image_id were dictionaries
     filename = file_from_imageid(image_id["subset"], image_id["image_id"])
     image_file = join(file_paths.COCO_IMAGES, image_id["subset"], filename)
     if not exists(image_file):
@@ -51,16 +52,18 @@ def get_image_file(image_id):
     return image_file
 
   if isinstance(image_id, str):
-    # TODO we should probably make image_id structured
     if image_id.startswith("imsitu/"):
       return join(file_paths.IMSITU_IMAGE_DIR, image_id[len("imsitu/"):])
 
-    # select what kind of image based on the fact web images do not have a file ending
+    # I didn't use sensible prefixes for opensce and web images, so as a hack we check
+    # for their correct source based on the fact the web images do not have
+    # a file prefix.
     if image_id.endswith(".jpg"):
       return join(file_paths.OPENSCE_IMAGES, image_id)
     else:
       return join(file_paths.WEB_IMAGES_DIR, image_id)
 
+  # Legacy coc image_ids were integer, look up its filepath here
   global _IMAGE_ID_TO_FILE_MAP
   if _IMAGE_ID_TO_FILE_MAP is None:
     _IMAGE_ID_TO_FILE_MAP = _build_image_file_map()
@@ -144,11 +147,13 @@ def load_image_pil(image_id, crop) -> Image.Image:
 
 
 def load_image_data(example, size):
-  return load_image_ndarray(example.image_id, size, example.crop)
+  if hasattr(example, "image_file"):
+    # Allow examples to specify their own file
+    return load_image_ndarray(example.image_file, size, example.crop)
+  return load_image_ndarray(get_image_file(example.image_id), size, example.crop)
 
 
-def load_image_ndarray(image_id, image_size=None, crop=None) -> Tuple[np.ndarray, Tuple[int, int]]:
-  img_file = get_image_file(image_id)
+def load_image_ndarray(img_file, image_size=None, crop=None) -> Tuple[np.ndarray, Tuple[int, int]]:
   try:
     img = skio.imread(img_file)
     if len(img.shape) == 2:
@@ -156,7 +161,7 @@ def load_image_ndarray(image_id, image_size=None, crop=None) -> Tuple[np.ndarray
     else:
       img = img[:, :, :3]
   except OSError as e:
-    raise ValueError(f"Error reading image {image_id}: {img_file}")
+    raise ValueError(f"Error reading image {img_file}")
 
   if crop:
     img = crop_img(img, crop)

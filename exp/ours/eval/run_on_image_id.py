@@ -1,6 +1,6 @@
 """This script demos how to use our model on a particular image"""
 import argparse
-from typing import List
+from typing import List, Dict, Any
 
 import torch.cuda
 
@@ -60,7 +60,7 @@ def main():
   )
   input_batch = [query_input]
   input_batch = [model.preprocess_example(x) for x in input_batch]
-  features = model.get_collate()(input_batch)
+  features: Dict[str, Any] = model.get_collate()(input_batch)
   features = our_utils.to_device(features, device)
 
   print("Starting prediction...")
