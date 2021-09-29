@@ -10,6 +10,7 @@ from exp.ours.train.trainer import Trainer, RunArgs
 
 def main():
   parser = argparse.ArgumentParser()
+
   parser.add_argument("--output_dir")
   parser.add_argument("--device", nargs="+", default=None)
   parser.add_argument("--num_workers", default=None, type=int)
