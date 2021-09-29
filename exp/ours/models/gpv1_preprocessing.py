@@ -2,7 +2,6 @@ from allennlp.common import Params
 from dataclasses import replace
 
 from exp.ours.data.coco_segmentation import SegmentationExample
-from exp.ours.data.conceptual_captions import VinVLConceptualCaption
 from exp.ours.data.gpv_example import GPVExample, SegmentationLabel
 from exp.ours.data.dataset import *
 import torchvision.transforms as T
