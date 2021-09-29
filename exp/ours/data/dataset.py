@@ -120,6 +120,10 @@ class LocalizationExample:
   category: str
   meta: Optional[Dict] = None
 
+  @property
+  def crop(self):
+    return None
+  
   def get_gpv_id(self):
     return self.gpv_id
 

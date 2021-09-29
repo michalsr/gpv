@@ -2,6 +2,7 @@ from allennlp.common import Params
 from dataclasses import replace
 
 from exp.ours.data.coco_segmentation import SegmentationExample
+from exp.ours.data.conceptual_captions import VinVLConceptualCaption
 from exp.ours.data.gpv_example import GPVExample, SegmentationLabel
 from exp.ours.data.dataset import *
 import torchvision.transforms as T
@@ -42,6 +43,8 @@ def get_stocastic_transforms(task: Task, cls_horizontal_flip=True):
 
 
 def get_train_transforms(task: Task, cls_horizontal_flip=True):
+  if task in {Task.SEGMENTATION}:
+    return None
   return T.Compose(
     [
       T.ToPILImage(mode='RGB')
@@ -225,7 +228,7 @@ class Gpv1Preprocessor(FromParams):
         query=[self.preprocess_text(example.query)],
         target_answer=None if example.target_answer is None else self.preprocess_text(example.target_answer),
         meta=None if include_meta else example.meta,
-        query_boxes=default_query_box
+        query_boxes=example.query_boxes if example.query_boxes is not None else default_query_box
       )]
     elif isinstance(example, ClsExample):
       out = [GPVExample(
