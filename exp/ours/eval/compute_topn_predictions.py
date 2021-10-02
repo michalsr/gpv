@@ -47,43 +47,43 @@ DEFAULT_MAX_SEQ_LEN = {
 }
 
 
-def eval_on(args, run_dir, dataset, devices, skip_existing=True):
-  if args.output_dir:
-    output_dir = args.output_dir
+def eval_on(args, run_dir, dataset, devices, skip_existing=False):
+  #if args.output_dir:
+  output_dir = 'outputs/coco_60_test'
 
-  elif args.output_name:
-    name = f"{dataset.get_name()}--{args.output_name}"
-    eval_dir = join(run_dir, "eval")
-    if not exists(eval_dir):
-      os.mkdir(eval_dir)
-    output_dir = join(eval_dir, name)
-  else:
-    output_dir = None
+ # elif args.output_name:
+   # name = f"{dataset.get_name()}--{args.output_name}"
+   # eval_dir = join(run_dir, "eval")
+    #if not exists(eval_dir):
+     # os.mkdir(eval_dir)
+    #output_dir = join(eval_dir, name)
+  #else:
+   # output_dir = None
 
-  if output_dir is not None:
-    if exists(output_dir):
-      if len(os.listdir(output_dir)) > 0:
-        if skip_existing:
-          logging.info(f"{output_dir} already exists, skipping")
-          return
+ # if output_dir is not None:
+    #if exists(output_dir):
+     # if len(os.listdir(output_dir)) > 0:
+        #if skip_existing:
+          #logging.info(f"{output_dir} already exists, skipping")
+          #return
 
-        if args.override or py_utils.get_yes_no(f"{output_dir} exists, delete (y/n)?"):
-          logging.info(f"Deleting {output_dir}")
-          rmtree(output_dir)
-        else:
-          logging.info("No override, not stopping")
-          return
-    elif not exists(dirname(output_dir)):
-      raise ValueError(f"Parent folder {dirname(output_dir)} does not exist")
-    else:
-      logging.info(f"Will save to {output_dir}")
-  else:
-    logging.info(f"Not saving the output")
+        #if args.override or py_utils.get_yes_no(f"{output_dir} exists, delete (y/n)?"):
+         # logging.info(f"Deleting {output_dir}")
+          #rmtree(output_dir)
+       # else:
+          #logging.info("No override, not stopping")
+         # return
+    #elif not exists(dirname(output_dir)):
+      #raise ValueError(f"Parent folder {dirname(output_dir)} does not exist")
+    #else:
+      #logging.info(f"Will save to {output_dir}")
+  #else:
+    #logging.info(f"Not saving the output")
 
-  if output_dir:
-    if not exists(output_dir):
-      os.mkdir(output_dir)
-    logging.info(f"Saving output to {output_dir}")
+  #if output_dir:
+    #if not exists(output_dir):
+     # os.mkdir(output_dir)
+    #logging.info(f"Saving output to {output_dir}")
 
   task = dataset.get_task()
 
@@ -168,7 +168,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("model")
+  parser.add_argument("--model")
   add_dataset_args(parser, task_default=("train",))
   parser.add_argument("--boost_unseen", type=float, default=None)
   parser.add_argument("--boost_syn", action="store_true")
