@@ -47,7 +47,10 @@ DEFAULT_MAX_SEQ_LEN = {
 }
 
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> ec74f7e... exp
 def eval_on(args, run_dir, dataset, devices, skip_existing=False):
   #if args.output_dir:
   output_dir = 'outputs/coco_60_test'
