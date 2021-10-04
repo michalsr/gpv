@@ -47,6 +47,7 @@ DEFAULT_MAX_SEQ_LEN = {
 }
 
 
+
 def eval_on(args, run_dir, dataset, devices, skip_existing=False):
   #if args.output_dir:
   output_dir = 'outputs/coco_60_test'
@@ -128,42 +129,42 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
     run_dir, examples, devices, args.batch_size, args.num_workers,
     prediction_args, beams_to_keep=args.beams_to_keep)
 
-  if output_dir is not None:
-    logging.info(f"Saving output to {output_dir}")
-    save_gpv_output(output, output_dir)
 
-    config = dict(
-      batch_size=args.batch_size,
-      num_workers=args.num_workers,
-      predictions_args=prediction_args_to_json(prediction_args),
-      dataset=to_params(dataset, Dataset),
-      date=datetime.now().strftime("%m%d-%H%M%S"),
-    )
+  logging.info(f"Saving output to {output_dir}")
+  save_gpv_output(output, output_dir)
 
-    with open(output_dir + "/config.json", "w") as f:
-      json.dump(config, f, indent=2)
+  config = dict(
+    batch_size=args.batch_size,
+    num_workers=args.num_workers,
+    predictions_args=prediction_args_to_json(prediction_args),
+    dataset=to_params(dataset, Dataset),
+    date=datetime.now().strftime("%m%d-%H%M%S"),
+  )
 
-  if args.eval:
-    if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
-      logging.info("Skip evaluating since no labels OpenSce Captioning")
-      return
-    else:
-      logging.info("Evaluating...")
-    evaluator, subsets = get_evaluator(dataset)
+  with open(output_dir + "/config.json", "w") as f:
+    json.dump(config, f, indent=2)
 
-    results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
+ 
+  if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
+    logging.info("Skip evaluating since no labels OpenSce Captioning")
+    return
+  else:
+    logging.info("Evaluating...")
+  evaluator, subsets = get_evaluator(dataset)
 
-    if output_dir is not None:
-      results[ResultKey("n", None)] = len(output)
-      logging.info(f"Caching evaluation to {output_dir}")
-      cache_evaluation(output_dir, evaluator, results)
+  results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
 
-    if task != Task.CAPTIONING:
-      factor = 100
-    else:
-      factor = 1
-    results = {str(k): v*factor for k, v in results.items()}
-    print(json.dumps(results, indent=2))
+ 
+  results[ResultKey("n", None)] = len(output)
+  logging.info(f"Caching evaluation to {output_dir}")
+  cache_evaluation(output_dir, evaluator, results)
+
+  if task != Task.CAPTIONING:
+    factor = 100
+  else:
+    factor = 1
+  results = {str(k): v*factor for k, v in results.items()}
+  print(json.dumps(results, indent=2))
 
 
 def main():
@@ -185,6 +186,7 @@ def main():
   parser.add_argument("--output_name")
   parser.add_argument("--dry_run", action="store_true")
   parser.add_argument("--nms", type=float, default=None)
+  parser.add_argument("--actual_output_dir",type=str,default='outputs/new_1')
   args = parser.parse_args()
 
   py_utils.add_stdout_logger()
@@ -204,6 +206,8 @@ def main():
       raise ValueError("Cannot use one output dir if more than one model selected!")
     model = models[0]
     datasets = get_datasets_from_args(args, model)
+    print(dataset.split_txt)
+    dataset.change_split("gpv_split")
     if len(datasets) > 1:
       raise ValueError("Cannot use one output dir if more than one dataset is selected!")
     if len(datasets) == 0:
@@ -214,6 +218,7 @@ def main():
     targets = []
     for model_name, (model_dir, runs) in models.items():
       for ds in get_datasets_from_args(args, model_dir):
+        ds.change_split("gpv_split")
         for run_dir in runs:
           targets.append((run_dir, ds))
 
@@ -221,11 +226,13 @@ def main():
       raise ValueError("No datasets to evaluate on found!")
 
     for i, (run_dir, dataset) in enumerate(targets):
+   
       if len(targets) > 1:
         logging.info(f"Evaluating on {run_dir} {dataset.get_name()} ({i+1}/{len(targets)})")
       else:
         logging.info(f"Evaluating on {run_dir} {dataset.get_name()}")
-      eval_on(args, run_dir, dataset, devices, skip_existing=len(targets) > 1)
+
+      eval_on(args, run_dir, dataset, devices, args.actual_output_dir,skip_existing=len(targets) > 1)
 
 
 if __name__ == '__main__':

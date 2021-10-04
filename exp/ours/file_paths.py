@@ -14,7 +14,7 @@ VQA2_SOURCE = join(DATA_DIR, "vqa-2.0")
 
 TORCHVISION_CACHE_DIR = join(DATA_DIR, "torchvision-cache")
 
-WEB_IMAGES_DIR = join(DATA_DIR, "ai2-prior-gpv1web-bing/images")
+WEB_IMAGES_DIR = join(DATA_DIR, "web_data/images")
 
 #CACHE_DIR = join(dirname(dirname(dirname(__file__))), "data-cache")
 # CACHE_DIR = "/home/amitak/gpv-2/gpv/data-cache"
@@ -23,7 +23,7 @@ PRECOMPUTED_FEATURES_DIR = "/data/michal5/gpv/data-cache/precomputed-features/"
 WEBQA_ALL_FIFTH_ANSWERS = join(CACHE_DIR, "webqa_fifth_answers.json")
 
 GPV_DIR = join(DATA_DIR, "gpv")
-WEBQA_DIR = join(GPV_DIR, "learning_phase_data/webqa")
+WEBQA_DIR = join(GPV_DIR, "learning_phase_data/web_20")
 COCO_IMAGES = join(GPV_DIR, "learning_phase_data/coco/images")
 
 PRETRAINED_DETR_MODELS = {
