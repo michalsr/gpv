@@ -38,7 +38,7 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
     raise NotImplementedError(kind)
   if ds == "web_80":
     split_txt = ""
-<<<<<<< HEAD
+
 
   if split_txt not in {"held_out_all","held_out_test","gpv_split","original_split"}:
     split_txt="held_out_all"
@@ -47,9 +47,7 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
 
  
 
-=======
-  split_txt = "held_out_test"
->>>>>>> ec74f7e... exp
+
   # elif unseen_split==True:
   #   split_txt = "held_out_all"
   # else:
