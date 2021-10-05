@@ -15,7 +15,8 @@ from exp.ours.util.py_utils import int_to_str
 from utils.io import load_json_object, dump_json_object
 import numpy as np
 
-
+ID_LIST = set([0])
+LAST_ID = 0
 @PredictionArg.register("webqa-answers")
 class WebQaAnswers(PredictionArg, list):
   def __init__(self, question_types="all"):
@@ -141,15 +142,22 @@ def _intern(x):
     return None
   return sys.intern(x)
 
+def generate_id():
+  while LAST_ID in ID_LIST:
+    LAST_ID += 1
+  ID_LIST.add(LAST_ID)
+  return LAST_ID 
 
 def load_webqa(split, qtypes):
   file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
-
+  
   prefix = "web" if split == "val" else f"web-{split}"
   logging.info(f"Loading webqa data from {file}")
   raw_instances = load_json_object(file)
   out = []
   for i, x in enumerate(raw_instances):
+
+
     if isinstance(x["image"], dict):
       image_id = x["image"]["image_id"]
     else:
@@ -160,7 +168,7 @@ def load_webqa(split, qtypes):
       None, noun=_intern(x["noun"]),
       adj=_intern(x["adj"]), verb=_intern(x["verb"])
     )
-
+    web_ids = x['web_id']
     ex_types = []
     if "1n" in qtypes:
       ex_types.append(("1n", ex.noun))
@@ -171,6 +179,9 @@ def load_webqa(split, qtypes):
     if ex.adj is not None:
       ex_types += [(q, ex.adj) for q in ["1a", "2a"] if q in qtypes]
     for q, ans in ex_types:
-      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}-{q}"))
+
+      
+      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}-{q}-{web_ids[q]}"))
+
   return out
 
