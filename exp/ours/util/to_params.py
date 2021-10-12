@@ -64,7 +64,8 @@ def to_params_any(obj, annotation):
       candidates = []
       for anno in annotation.__args__:
         if hasattr(anno, "__args__") and hasattr(anno, "__origin__") and anno.__args__ is not None:
-          if isinstance(obj, anno.__origin__):  # Just check the top-level types
+          # Anno is a container with its own sub-types, hust check the top-level types
+          if isinstance(obj, anno.__origin__):
             candidates.append(anno)
         else:
           if isinstance(obj, anno):
@@ -94,8 +95,7 @@ def to_params_any(obj, annotation):
   # Collections, if there are type annotations, try to preserve them, since we will need
   # them if the collection contains `FromParams` classes
   # For the most part we trust clients to have correctly-typed containers
-  elif obj_type in (list, set, frozenset):
-    # Single arg containers
+  elif obj_type in (list, set, frozenset): # Single arg containers
     if not _has_args(annotation):
       anno = typing.Any
     else:
@@ -114,8 +114,7 @@ def to_params_any(obj, annotation):
         # TODO handle variable length tuple annotation
         raise ValueError()
       return obj.__class__(to_params_any(x, anno) for x, anno in zip(obj, annotation.__args__))
-  elif obj_type in (dict, OrderedDict, Dict):
-    # Two arg containers
+  elif obj_type in (dict, OrderedDict, Dict): # Two arg containers
     if not _has_args(annotation):
       k_anno, v_anno = typing.Any, typing.Any
     else:
