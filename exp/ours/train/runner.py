@@ -167,8 +167,14 @@ def run_dist(model_source, examples, devices,
 
   input_q = ctx.Queue()
   for ex in examples:
+    # Putting tensors into the queue can lead to tricky errors as it hits
+    # torch's tensor-sharing code. It seems easier to just work-around it
+    # since we aren't worried about memory consumption anyway
     assert all(not isinstance(v, torch.Tensor) for v in asdict(ex).values())
-    input_q.put(model.preprocess_example(ex))
+    # Block so the queue will be completely filled before
+    # multiprocessing start
+    input_q.put(model.preprocess_example(ex), block=True)
+
   out_q = ctx.Queue()
 
   args = (

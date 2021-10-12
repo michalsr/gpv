@@ -319,13 +319,24 @@ def get_batch_bounds(n, n_batches):
 
 class QueueDataset(IterableDataset):
   def __init__(self, q):
+    """
+    q: Queue with all elements we want to yield already queue up
+    """
     self.q = q
 
   def __iter__(self):
-    item = self.q.get(block=False)
-    if item is None:
-      return
-    yield item
+    while True:
+      try:
+        # Queue is pre-populated, so only fails if all elements have been loaded
+        item = self.q.get(block=False)
+        if item is None:
+          return
+        yield item
+      except Empty:
+        # For non-blocking calls, empty can be raised even if the queue had elements
+        # in it (due to locking issues?) double check here
+        if self.q.empty():
+          return
 
 
 class SubsetSampler(Sampler):
