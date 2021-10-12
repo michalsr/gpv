@@ -533,9 +533,9 @@ class CaptionEvaluator(Evaluator):
     res = {}
     gts = {}
     for ix, instance in enumerate(examples):
-      key = instance.gpv_id
+      key = instance.get_gpv_id()
       assert key not in res
-      res[key] = [predictions[instance.gpv_id].text[0]]
+      res[key] = [predictions[instance.get_gpv_id()].text[0]]
       gts[key] = [x.caption.lower() for x in instance.captions]
 
     res, gts = self.tokenizer.tokenize_captions(res, gts)
