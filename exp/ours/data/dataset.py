@@ -145,6 +145,10 @@ class CaptioningExample:
   captions: List[Caption]
   meta: Optional[Dict[str, Any]] = None
 
+  @property
+  def crop(self):
+    return None
+
   def get_gpv_id(self):
     return self.gpv_id
 
