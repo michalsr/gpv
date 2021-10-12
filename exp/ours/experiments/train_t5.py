@@ -6,7 +6,7 @@ from copy import deepcopy
 import torch.utils.data
 from transformers import AutoConfig
 
-from exp.ours.data.webqa import WebQaDataset
+from exp.ours.data.webqa import WebQaDataset, WebQaNoTemmplatesDataset
 from exp.ours.data.webqa_templates import WebQaQueryGenerator, TemplateWebQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
@@ -31,11 +31,11 @@ def main():
   parser.add_argument("--webqa_subset",  default=None)
   parser.add_argument("--find_unused", action="store_true")
   parser.add_argument("--init_from")
-  parser.add_argument("--vlr", type=float)
   parser.add_argument("--train_from")
   parser.add_argument("--vwarmup", type=float, default=0.1)
   parser.add_argument("--sce", action="store_true")
   parser.add_argument("--weight_decay", type=float, default=1e-4)
+  parser.add_argument("--vlr", type=float)
   parser.add_argument("--delay", type=float, default=0.0)
 
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
@@ -68,7 +68,7 @@ def main():
     query_box="always",
     all_lower_case=True,
     webqa_templates=TemplateWebQueryGenerator(use_commands=True),
-    initialize_from=args.init_from
+    initialize_from=args.init_from,
   )
 
   groups = [ParameterGroup(
@@ -94,23 +94,26 @@ def main():
   )
 
   if args.webqa_subset is not None:
-    qtypes = args.webqa_subset
-    qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get(qtypes, (qtypes,))
-    # Set the val set for debugging since loading the train set is slow
-    webqa_train = WebQaDataset("val" if args.debug else "train",
-                               100 if args.debug else None, qtypes)
-    webqa_val = WebQaDataset("val", 100 if args.debug else None, qtypes)
+
+    if args.webqa_subset == "notemplates-4/5":
+      qtypes = tuple("5a 5n 5v 6a 6v".split())
+      webqa_train = WebQaNoTemmplatesDataset("train", 100 if args.debug else None, qtypes)
+      webqa_val = WebQaNoTemmplatesDataset("val", 100 if args.debug else None, qtypes)
+    elif args.webqa_subset == "notemplates-3/4":
+      qtypes = tuple("3a 3n 3v 4a 4v".split())
+      webqa_train = WebQaNoTemmplatesDataset("train", 100 if args.debug else None, qtypes)
+      webqa_val = WebQaNoTemmplatesDataset("val", 100 if args.debug else None, qtypes)
+    else:
+      qtypes = args.webqa_subset
+      qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get(qtypes, (qtypes,))
+      webqa_train = WebQaDataset("val" if args.debug else "train",
+                                 100 if args.debug else None, qtypes)
+      webqa_val = WebQaDataset("val", 100 if args.debug else None, qtypes)
+
     webqq_eval = EvaluationSetup(
       evaluator.WebQaEvaluator(),
-      dict(beam_search_spec=BeamSearchSpec(1, 5),
-           answer_options=webqa_train.get_answer_options(False))
+      dict(beam_search_spec=BeamSearchSpec(1, 5))
     )
-
-    # Add the WebQaDataset we want to experiment with
-    # trainer.train_datasets = []
-    # trainer.eval_datasets = []
-    # trainer.best_model_key = [ResultKey(
-    #   metric_name="accuracy", dataset_name="webqa-val")]
 
     trainer.train_datasets.append(TrainerDataset(
       webqa_train, "webqa-tr",

@@ -92,7 +92,7 @@ def load_webqa_notemplates(split, qtypes) -> List[GPVExample]:
   for item in data:
     if qtypes == "all":
       keep = True
-    if isinstance(qtypes, tuple):
+    elif isinstance(qtypes, tuple):
       keep = item["question_type"] in qtypes
     else:
       raise NotImplementedError(qtypes)
