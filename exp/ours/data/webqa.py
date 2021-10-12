@@ -53,6 +53,60 @@ class WebQaAnswersBoost(MaskSpec):
     return False
 
 
+@Dataset.register("webqa-notemplates")
+class WebQaNoTemmplatesDataset(Dataset):
+  def __init__(self, split: str, sample=None, qtypes="all"):
+    self.split = split
+    self.sample = sample
+    self.qtypes = qtypes
+
+  def get_name(self) -> str:
+    name = f"webqa-v3"
+    if isinstance(self.qtypes, tuple):
+      name += f"-{''.join(sorted(self.qtypes))}"
+    else:
+      name += f"-{self.qtypes}"
+    name += f"-{self.split}"
+    if self.sample is not None:
+      name += f"-s{int_to_str(self.sample)}"
+    return name
+
+  def get_task(self) -> Task:
+    return Task.WEBQA
+
+  def load(self) -> List[GPVExample]:
+    instances = load_webqa_notemplates(self.split, self.qtypes)
+    if self.sample:
+      instances.sort(key=lambda x: x.gpv_id)
+      np.random.RandomState(613423).shuffle(instances)
+      return instances[:self.sample]
+    else:
+      return instances
+
+
+def load_webqa_notemplates(split, qtypes) -> List[GPVExample]:
+  file = join(file_paths.WEBQA_NO_TEMPLATES_DIR, f"{split}.json")
+  logging.info(f"Loading webqa data from {file}")
+  data = load_json_object(file)
+  out = []
+  for item in data:
+    if qtypes == "all":
+      keep = True
+    if isinstance(qtypes, tuple):
+      keep = item["question_type"] in qtypes
+    else:
+      raise NotImplementedError(qtypes)
+    if keep:
+      out.append(GPVExample(
+        id=item["id"],
+        image_id=item["image"]["image_id"],
+        task=Task.WEBQA,
+        query=item["query"],
+        target_answer=item["answer"],
+      ))
+  return out
+
+
 @dataclass
 class WebQaExample:
   """
