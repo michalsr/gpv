@@ -1,8 +1,10 @@
 import logging
 import os
+import pickle
 from collections import defaultdict
 from os import listdir, path, walk
 from os.path import join, exists, isdir, basename, relpath, dirname
+from queue import Empty
 from typing import List, Union, Optional
 
 import numpy as np
@@ -22,7 +24,7 @@ IMPORT_DONE = False
 def import_all():
   global IMPORT_DONE
   if not IMPORT_DONE:
-    for k in ["models", "train", "image_featurizer"]:
+    for k in ["models", "train", "image_featurizer", "experimental"]:
       import_module_and_submodules(f"exp.ours.{k}")
     IMPORT_DONE = True
 
@@ -102,7 +104,7 @@ def extract_runs(model_dir, require_done=True):
   return runs
 
 
-def stack_and_pad(tensors: List, max_len=None, pad=0.0) -> torch.Tensor:
+def stack_and_pad(tensors: List, max_len=None, pad=0.0, build_mask=False):
   tensors = [torch.as_tensor(x) for x in tensors]
   if max_len is None:
     max_len = max(x.size(0) for x in tensors)
@@ -111,10 +113,47 @@ def stack_and_pad(tensors: List, max_len=None, pad=0.0) -> torch.Tensor:
     out = torch.full((len(tensors), max_len, t0.size(1)), pad, dtype=t0.dtype, device=t0.device)
   else:
     out = torch.full((len(tensors), max_len), pad, dtype=t0.dtype, device=t0.device)
-
   for i, t in enumerate(tensors):
     out[i, :t.size(0)] = t
-  return out
+
+  if build_mask:
+    mask = torch.zeros((len(tensors), max_len), dtype=torch.bool, device=t0.device)
+    for i, t in enumerate(tensors):
+      mask[i, :t.size(0)] = True
+    return out, mask
+  else:
+    return out
+
+
+def log_prob_to_logits(logprob, eps=-1e-7):
+  # Note eps needs to be large enough so torch.exp(eps) != 1.0, 1e-8 is too large
+  assert torch.all(logprob <= 0.0)
+  logprob = torch.minimum(
+    logprob, torch.as_tensor([eps], device=logprob.device, dtype=logprob.dtype))
+  inv_logprob = torch.log1p(-torch.exp(logprob))
+  if not torch.all(torch.isfinite(inv_logprob)):
+    with open("/tmp/out.pkl", "wb") as f:
+      pickle.dump((logprob, eps, inv_logprob), f)
+    raise ValueError()
+  return torch.stack([logprob, inv_logprob], -1)
+
+
+def stack_and_pad_blocks(tensors: List, max_len=None, pad=0.0):
+  if max_len is None:
+    max_len = max(x.size(1) for x in tensors)
+  total_n = sum(x.size(0) for x in tensors)
+
+  t0 = tensors[0]
+  out = torch.full((total_n, max_len, t0.size(2)), pad, dtype=t0.dtype, device=t0.device)
+  mask = torch.zeros((total_n, max_len,), dtype=torch.bool, device=t0.device)
+
+  on = 0
+  for i, t in enumerate(tensors):
+    out[on:on+t.size(0), :t.size(1)] = t
+    mask[on:on+t.size(0), :t.size(1)] = True
+    on = on + t.size(0)
+  assert on == total_n
+  return out, mask
 
 
 def find_models(roots, require_runs=True, require_done=True):
@@ -284,10 +323,12 @@ class QueueDataset(IterableDataset):
 
   def __iter__(self):
     while True:
-      element = self.q.get()
-      if element is None:
+      try:
+        # Queue is pre-populated, so only fails if all elements have been loaded
+        item = self.q.get(block=False)
+        yield item
+      except Empty:
         return
-      yield element
 
 
 class SubsetSampler(Sampler):
@@ -308,6 +349,13 @@ class SubsetSampler(Sampler):
 
   def __len__(self):
     return self.n_examples
+
+
+def masked_to_flattened(tensor, int_mask):
+  out = []
+  for i, n in enumerate(int_mask):
+    out.append(tensor[i, :n])
+  return torch.cat(out, 0)
 
 
 class DistributedSubsetSampler(Sampler):
@@ -341,6 +389,15 @@ class DistributedSubsetSampler(Sampler):
   def __len__(self):
     s, e = self.bound[self.rank]
     return e - s
+
+
+def convert_logprob_to_sigmoid_logit(logprob, eps=-1e-6):
+  assert torch.all(logprob <= 0.0)
+  objectness = torch.minimum(
+    logprob, torch.as_tensor([eps], device=logprob.device, dtype=logprob.dtype))
+  object_lp = objectness
+  non_object_lp = torch.log1p(-torch.exp(object_lp))
+  return object_lp - non_object_lp
 
 
 def select_run_dir(run_dir):
