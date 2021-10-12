@@ -95,7 +95,7 @@ def main():
 
   if args.webqa_subset is not None:
 
-    if args.webqa_subset == "notemplates-4/5":
+    if args.webqa_subset == "notemplates-5/6":
       qtypes = tuple("5a 5n 5v 6a 6v".split())
       webqa_train = WebQaNoTemmplatesDataset("train", 100 if args.debug else None, qtypes)
       webqa_val = WebQaNoTemmplatesDataset("val", 100 if args.debug else None, qtypes)
