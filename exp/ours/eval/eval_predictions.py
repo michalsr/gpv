@@ -273,6 +273,9 @@ def get_hypers(h_name, model_dir):
     hyper["batch_size"] = str(trainer_data["train_loader"]["batch_size"])
 
     model_data = load_json_object(join(model_dir, "model.json"))
+    if model_data["type"] == "t5-gpv-per-box":
+      hyper["per-box"] = "True"
+
     templates = model_data.get("webqa_templates", "none")
 
     init_from = model_data.get("initialize_from")
