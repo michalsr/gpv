@@ -147,7 +147,7 @@ def load_image_pil(image_id, crop) -> Image.Image:
 
 
 def load_image_data(example, size):
-  if hasattr(example, "image_file"):
+  if hasattr(example, "image_file") and example.image_file is not None:
     # Allow examples to specify their own file
     return load_image_ndarray(example.image_file, size, example.crop)
   return load_image_ndarray(get_image_file(example.image_id), size, example.crop)
