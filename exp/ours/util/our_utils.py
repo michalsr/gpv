@@ -322,13 +322,10 @@ class QueueDataset(IterableDataset):
     self.q = q
 
   def __iter__(self):
-    while True:
-      try:
-        # Queue is pre-populated, so only fails if all elements have been loaded
-        item = self.q.get(block=False)
-        yield item
-      except Empty:
-        return
+    item = self.q.get(block=False)
+    if item is None:
+      return
+    yield item
 
 
 class SubsetSampler(Sampler):

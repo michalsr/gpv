@@ -22,8 +22,8 @@ TEMPLATES['verb'] = [
   "WH activity is being done?",
   "WH activity is this?",
   "WH action is being taken?",
-  "CMD the activity being doing.",
-  "CMD the action being doing.",
+  "CMD the activity being done.",
+  "CMD the action being done.",
   "CMD the action being taken.",
 ]
 
