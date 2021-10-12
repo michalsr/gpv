@@ -102,14 +102,22 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
     raise NotImplementedError(args.rank_answer_options)
 
   prediction_args = {}
+  beams_to_keep = args.beams_to_keep
+  batch_size = args.batch_size
 
   if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA} and args.cls_mask != "none":
     answer_options = dataset.get_answer_options(args.cls_mask == "synonyms")
     prediction_args["answer_options"] = answer_options
     logging.info(f"Using classification mask for {len(answer_options)} words")
 
-  if do_rerank:
+  if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA}:
+    logging.info("Classification so keeping 20 beams")
+    beams_to_keep = 20
+
+  if do_rerank and prediction_args.get("answer_options"):
     logging.info(f"Re-ranking answer options")
+    logging.info(f"Reducing batch size to 5")
+    batch_size = 5
     prediction_args["rerank_answer_options"] = True
   else:
     if args.max_seq_len:
@@ -143,19 +151,19 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=True):
     return
 
   output = run(
-    run_dir, examples, devices, args.batch_size, args.num_workers,
-    prediction_args, beams_to_keep=args.beams_to_keep)
+    run_dir, examples, devices, batch_size, args.num_workers,
+    prediction_args, beams_to_keep=beams_to_keep)
 
   if output_dir is not None:
     logging.info(f"Saving output to {output_dir}")
     save_gpv_output(output, output_dir)
 
     config = dict(
-      batch_size=args.batch_size,
+      batch_size=batch_size,
       num_workers=args.num_workers,
       predictions_args=prediction_args_to_json(prediction_args),
       dataset=to_params(dataset, Dataset),
-      beams_to_keep=args.beams_to_keep,
+      beams_to_keep=beams_to_keep,
       date=datetime.now().strftime("%m%d-%H%M%S"),
     )
 
