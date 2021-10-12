@@ -44,7 +44,7 @@ class GPVExample:
   """Optionally for a crop of the image in [x, y, h, w] form"""
   crop: Optional[Tuple[float, float, float, float]] = None
 
-  """Optional array boxes that are part of the query in [x, y, h, w] form"""
+  """Optional array boxes that are part of the query in [x, y, w, h] form"""
   query_boxes: np.ndarray = None
 
   """Optional labels for segmentation tasks"""
