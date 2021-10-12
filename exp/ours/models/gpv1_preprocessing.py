@@ -126,11 +126,13 @@ CLS_QUERIES = [
 
 class Gpv1Preprocessor(FromParams):
 
-  def __init__(self, webqa_templates: Optional[WebQaQueryGenerator]=None, webqa_cls=False):
+  def __init__(self, webqa_templates: Optional[WebQaQueryGenerator]=None, webqa_cls=False,
+               relevance_query=None):
     self.webqa_templates = webqa_templates
     self.preprocess_text = None
     self.cls_queries_tok = None
     self.caption_queries_tok = None
+    self.relevance_query = relevance_query
     self.webqa_cls = webqa_cls
     self.expand_cls = webqa_cls
     self._cache = {}
@@ -186,13 +188,22 @@ class Gpv1Preprocessor(FromParams):
         )
       )]
     elif isinstance(example, LocalizationExample):
+      if self.relevance_query is None:
+        rel_query = None
+      elif self.relevance_query == "category":
+        rel_query = example.category
+      elif self.relevance_query == "relevant":
+        rel_query = "relevant"
+      else:
+        raise NotImplementedError(self.relevance_query)
+
       out = [GPVExample(
         example.gpv_id,
         Task.DETECTION,
         example.image_id,
         [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES],
         example.bboxes,
-        relevance_query=example.category,
+        relevance_query=rel_query,
         query_boxes=default_query_box,
         target_answer=None,
         meta=example.meta if include_meta else None
