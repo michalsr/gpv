@@ -129,11 +129,17 @@ def get_trainer_from_args(
     for x in train_datasets:
       if x.dataset.get_task() == Task.CAPTIONING:
         x.eval_sample = 5000
+      elif x.dataset.get_task() == Task.WEBQA:
+        x.eval_sample = 1314
       else:
         x.eval_sample = 8000
+   
     for x in eval_datasets:
+      print(x.dataset.get_task())
       if x.dataset.get_task() == Task.CAPTIONING:
         x.eval_sample = 8000
+      elif x.dataset.get_task() == Task.WEBQA:
+        x.eval_sample = 1314
       else:
         x.eval_sample = 12000
 

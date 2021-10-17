@@ -118,7 +118,7 @@ def main():
       eval_sample=50 if args.debug else 3000, eval_setup=webqq_eval
     ))
     trainer.eval_datasets.append(TrainerDataset(
-      webqa_val, "webqa-val", eval_sample=50 if args.debug else 12000, eval_setup=webqq_eval))
+      webqa_val, "webqa-val", eval_sample=1314, eval_setup=webqq_eval))
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
 
   trainer.stratify = True

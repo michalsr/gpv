@@ -419,6 +419,8 @@ class T5GPV(GPVModel):
             return F.log_softmax(logits + self.mask, -1)
           else:
             return F.log_softmax(logits + self.mask[time_step], -1)
+      if type(self.beam_search_spec) == dict:
+         bs = BeamSearchSpec(1,5)   
       bs = self.beam_search_spec.build(self.tokenizer.eos_token_id)
       decode_init = t5_initialize_decoding(
         self.tokenizer, self.model, encoder_outputs[0], input_mask, post_process)

@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
+from exp.ours.data.webqa import WebQaDataset
 from torch import distributed as dist
 from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
 from exp.ours.train import evaluator
@@ -58,6 +58,7 @@ def get_datasets():
     evaluator.ResultKey("AP", dataset_name="det-val"),
     evaluator.ResultKey("accuracy", dataset_name="webqa-val"),
   ]
+  qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get("basic", ("basic",))
   best_model_key = [x for x in best_model_key if any(x.dataset_name.startswith(str(t)) for t in tasks)]
   for x in train_datasets:
       if x.dataset.get_task() == Task.CAPTIONING:
@@ -69,7 +70,8 @@ def get_datasets():
         x.eval_sample = 8000
       else:
         x.eval_sample = 12000
-
+  webqa_train = WebQaDataset("train",
+                                None, qtypes)
   evaluation = {
     Task.VQA: EvaluationSetup(
       evaluator.VqaEvaluator(),
@@ -91,6 +93,11 @@ def get_datasets():
       evaluator.ClsEvaluator(),
       dict(beam_search_spec=BeamSearchSpec(1, 5), answer_options=CocoCategories())
     ),
+    Task.WEBQA: EvaluationSetup(
+      evaluator.WebQaEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 5),
+           answer_options=webqa_train.get_answer_options(False))
+    )
   }
   other_log = {}
   evals = [(x, True) for x in train_datasets] + [(x, False) for x in eval_datasets]
@@ -114,6 +121,30 @@ def get_datasets():
       raise RuntimeError()
     name = f"train-evals/{name}" if is_train else f"val-evals/{name}"
     other_log[evaluator.ResultKey(metric_name=metric_name, dataset_name=ds.get_name())] = name
+    qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get("basic", ("basic",))
+    # Set the val set for debugging since loading the train set is slow
+    webqa_val = WebQaDataset("val",  None, qtypes)
+    webqa_eval = EvaluationSetup(
+      evaluator.WebQaEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 5),
+           answer_options=webqa_train.get_answer_options(False))
+    )
+
+    # Add the WebQaDataset we want to experiment with
+    # trainer.train_datasets = []
+    # trainer.eval_datasets = []
+    # trainer.best_model_key = [ResultKey(
+    #   metric_name="accuracy", dataset_name="webqa-val")]
+
+    train_datasets.append(TrainerDataset(
+      webqa_train, "webqa-tr",
+      train_sample=1.0,
+      eval_sample=3000, eval_setup=webqa_eval
+    ))
+    eval_datasets.append(TrainerDataset(
+      webqa_val, "webqa-val", eval_sample=12000, eval_setup=webqa_eval))
+    #trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
+
   return train_datasets, eval_datasets, evaluation,other_log
 @dataclass
 class EvaluationSetup(FromParams):
@@ -161,7 +192,7 @@ class RunArgs(FromParams):
   devices: Union[str, int, List[int], None]
   seed: int
   dist_backend: str = "nccl"
-  dist_url: str = 'tcp://localhost:10001'
+  dist_url: str = 'file:///shared/rsaas/michal5/gpv_michal/none'
   send_model: str = "file"
   grad_accumulation: int = 1
   num_workers: Optional[int] = None
@@ -193,7 +224,7 @@ class RunArgs(FromParams):
     elif "PYTORCH_DIST_PORT" in os.environ:
       dist_port = f'tcp://localhost:{os.environ["PYTORCH_DIST_PORT"]}'
     else:
-      dist_port = f'tcp://localhost:10001'
+      dist_port = f'tcp://localhost:64801'
     return RunArgs(args, grad_accumulation=grad_accumulation,
                    num_workers=num_workers, seed=seed, dist_url=dist_port)
 
@@ -374,10 +405,37 @@ class Trainer(FromParams):
       trainer = Trainer.from_params(Params.from_file(join(output_dir, "trainer.json")))
     model_file = join(output_dir, "model.json")
     train_datasets, eval_datasets, evaluation,other_log = get_datasets()
-    trainer.train_datasets = train_datasets
-    trainer.eval_datasets = eval_datasets
+    #trainer.train_datasets = train_datasets
+    #trainer.eval_datasets = eval_datasets
     trainer.evaluation = evaluation
     trainer.train_val_log = list(other_log.items())
+    qtypes = "basic"
+    qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get("basic",("basic",))
+    webqa_train = WebQaDataset("train",None,qtypes)
+    webqa_val = WebQaDataset("val",None,qtypes)
+    webqq_eval = EvaluationSetup(
+         evaluator.WebQaEvaluator(),
+         dict(beam_search_spec=BeamSearchSpec(1,5),answer_options=webqa_train.get_answer_options(False)))
+    #trainer.train_datasets.append(TrainerDataset(webqa_train,"webqa-tr",train_sample=0.2,eval_sample=3000,eval_setup=webqq_eval))
+    for i,e in enumerate(trainer.eval_datasets):
+        print(e.logging_name,e.logging_name=='webqa-val')
+        if e.logging_name == 'webqa-val':
+          ind_remove=i
+          print(ind_remove,'ind rmeove')
+          e.eval_setup = webqq_eval
+    for i,e in enumerate(trainer.train_datasets):
+        if e.logging_name == 'webqa-tr':
+          print(trainer.train_datasets[i])
+          ind_remove_2 = i
+          e.eval_setup = webqq_eval
+          print(e.eval_setup)
+    #trainer.eval_datasets.pop(ind_remove)
+    #trainer.train_datasets.pop(ind_remove_2)
+    #trainer.train_datasets.append(TrainerDataset(webqa_train,"webqa-tr",train_sample=0.2,eval_sample=3000,eval_setup=webqq_eval))
+    #trainer.eval_datasets.append(TrainerDataset(webqa_val,"webqa-val",12000,eval_setup=webqq_eval))
+    trainer.best_model_key.append(ResultKey("accuracy",dataset_name="webqa-val"))
+    print(len(trainer.train_datasets),trainer.train_datasets[-1])
+    print(len(trainer.eval_datasets),trainer.eval_datasets[0])
     checkpoint_file = join(run_dir, "checkpoint.pth")
 
     run_args = RunArgs.build(device)

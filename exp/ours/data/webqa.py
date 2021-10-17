@@ -160,7 +160,7 @@ def load_webqa(split, qtypes):
       None, noun=_intern(x["noun"]),
       adj=_intern(x["adj"]), verb=_intern(x["verb"])
     )
-
+    web_ids = x['web_id']
     ex_types = []
     if "1n" in qtypes:
       ex_types.append(("1n", ex.noun))
@@ -171,6 +171,6 @@ def load_webqa(split, qtypes):
     if ex.adj is not None:
       ex_types += [(q, ex.adj) for q in ["1a", "2a"] if q in qtypes]
     for q, ans in ex_types:
-      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}-{q}"))
+      out.append(replace(ex, qtype=q, answer=ans, gpv_id=f"{prefix}-{q}-{web_ids[q]}"))
   return out
 
