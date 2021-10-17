@@ -30,7 +30,7 @@ def add_train_args(parser: ArgumentParser, batch_size=32, num_workers=6,
   parser.add_argument("--epochs", default=epochs, type=int)
   parser.add_argument("--debug", choices=["tiny", "small", "med", "large"], default=None)
 
-  parser.add_argument("--unseen",default=False,type=bool)
+  parser.add_argument("--split_txt",default="held_out_all",type=str)
 
   # Run format args
   parser.add_argument("--eval_start", action="store_true")
@@ -81,8 +81,8 @@ def get_trainer_from_args(
   train_datasets = []
   eval_datasets = []
   for task in tasks:
-    train_datasets.append(TrainerDataset(GpvDataset(task, "train", True,unseen_split=args.unseen), str(task) + "-tr"))
-    eval_datasets.append(TrainerDataset(GpvDataset(task, "val", True,unseen_split=args.unseen), str(task) + "-val"))
+    train_datasets.append(TrainerDataset(GpvDataset(task, "train", True,split_txt=args.split_txt), str(task) + "-tr"))
+    eval_datasets.append(TrainerDataset(GpvDataset(task, "val", True,split_txt=args.split_txt), str(task) + "-val"))
 
   best_model_key = [
     evaluator.ResultKey("accuracy", dataset_name="cls-val"),

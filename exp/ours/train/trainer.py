@@ -553,11 +553,7 @@ class Trainer(FromParams):
     all_train = py_utils.flatten_list(all_train)
     for x in all_train:
 
-      if x.id in id_sets:
-        print(x.id)
-      
-      else:
-        id_sets.add(x.id)
+      id_sets.add(x.id)
     if len(set(x.id for x in all_train)) != len(all_train):
       print(len(all_train))
       print(len(set(x.id for x in all_train)))
