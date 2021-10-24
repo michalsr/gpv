@@ -1,6 +1,6 @@
 import logging
 from argparse import ArgumentParser
-from os.path import join
+from os.path import join, dirname
 from typing import List
 
 from exp.ours.data.coco_segmentation import CocoSegmentationDataset
@@ -8,6 +8,7 @@ from exp.ours.data.dataset import Task, GPV1_TASKS, GPV2_TASKS
 from exp.ours.data.gpv import GpvDataset
 from exp.ours.data.opensce import OPENSCE_TASKS, OpenSceDataset
 from exp.ours.data.webqa import WebQaDataset
+from exp.ours.util import our_utils
 from utils.io import load_json_object
 
 
@@ -17,7 +18,7 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
                       choices=["val", "test", "all", "train"], nargs="+")
   parser.add_argument("--datasets", default=task_default,
                       required=task_default is None,
-                      choices=[str(x) for x in GPV1_TASKS] +
+                      choices=[str(x) for x in GPV2_TASKS] +
                               ["o" + x.value for x in OPENSCE_TASKS] +
                               ["webqa-fifth", "webqa", "segmentation"] +
                               ["all", "gpv1", "gpv2", "gpv2-eval", "opensce"], nargs="+")
@@ -28,7 +29,10 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
 def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=None) -> List[GpvDataset]:
   if model_dir is not None and trained_on_sce is None:
     # Figure out what gpv_split the model was trained on
-    trainer = load_json_object(join(model_dir, "trainer.json"))
+    if our_utils.is_model_dir(model_dir):
+      trainer = load_json_object(join(model_dir, "trainer.json"))
+    else:
+      trainer = load_json_object(join(dirname(model_dir), "trainer.json"))
     train_split = set()
     for ds in trainer["train_datasets"]:
       ds = ds["dataset"]

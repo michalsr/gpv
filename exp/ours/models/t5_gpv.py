@@ -7,7 +7,7 @@ from allennlp.common import Params
 from transformers import AutoTokenizer, AutoConfig
 
 from exp.ours.data.gpv import COCO_CATEGORIES
-from exp.ours.data.webqa_templates import WebQaQueryGenerator
+from exp.ours.data.webqa_templates import WebQaQueryGenerator, DefaultWebQueryGenerator
 from exp.ours.models.model import GPVModel, build_per_example_output
 from exp.ours.models.gpv1_preprocessing import Gpv1Preprocessor
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures
@@ -27,7 +27,6 @@ from exp.ours.util.to_params import to_params
 
 @GPVModel.register("t5-gpv")
 class T5GPV(GPVModel):
-  IMAGE_SEP = "[IMAGE]"
 
   @classmethod
   def from_params(
@@ -38,6 +37,9 @@ class T5GPV(GPVModel):
     # Handle various backwards compatibility issues
     if "box_aux_loss" in params:
       assert params.pop("box_aux_loss") is None
+    if "image_seperator" in params:
+      assert not params.pop("image_seperator")
+
     if "nms" in params and params["nms"] == 0.0:
       params["nms"] = None
     if "webqa_templates" not in params:
@@ -47,6 +49,14 @@ class T5GPV(GPVModel):
     if "relevance_conditioning" in params:
       # No longer supported
       assert params.pop("relevance_conditioning") is None
+
+    webqa_templates = params["webqa_templates"]
+    if webqa_templates is not None:
+      if "oversample_questions" in webqa_templates:
+        if "type" not in webqa_templates:
+          webqa_templates["type"] = "templated-v1"
+      elif "type" not in webqa_templates:
+        params["webqa_templates"] = None
     return super().from_params(params, **kwargs)
 
   def __init__(
@@ -60,14 +70,13 @@ class T5GPV(GPVModel):
       query_box=None,
       predict_trailing_pad_tokens=False,
       image_positional_bias="zero",
-      image_seperator=False,
       freeze_embed=False,
       initialize_joiner="coco",
       nms: float=None,
       all_lower_case=False,
-      relevance_embedding: None=None,
+      relevance_embedding: Optional[str]=None,
       webqa_templates: Optional[WebQaQueryGenerator]=None,
-      initialize_from=None
+      initialize_from=None,
   ):
     super().__init__()
     if nms == 0.0:
@@ -75,7 +84,7 @@ class T5GPV(GPVModel):
       # threshold and some old code conflated nms=0.0 with nms=None so we disallow nms=0.0 here
       # so we can treat 0.0 as None when loading this from a parameter file.
       raise ValueError("Need nms > 0.0")
-    if freeze_embed and image_seperator:
+    if freeze_embed:
       raise NotImplementedError()
     self.all_lower_case = all_lower_case
     self.image_relevance = image_relevance
@@ -88,12 +97,14 @@ class T5GPV(GPVModel):
     self.predict_trailing_pad_tokens = predict_trailing_pad_tokens
     self.image_positional_bias = image_positional_bias
     self.pre_tokenize = pre_tokenize
-    self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
-    self.webqa_templates = webqa_templates
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
     self.initialize_from = initialize_from
+
+    if webqa_templates is None:
+      webqa_templates = DefaultWebQueryGenerator()
+    self.webqa_templates = webqa_templates
 
     self.tokenizer = AutoTokenizer.from_pretrained(self.t5_model_name)
 
@@ -104,14 +115,6 @@ class T5GPV(GPVModel):
     # build new objects for duplicate queries/answers
     self.full_text_cache = {}
 
-    if self.image_seperator:
-      self.tokenizer.add_tokens([self.IMAGE_SEP])
-      image_sep_id = self.tokenizer.convert_tokens_to_ids([self.IMAGE_SEP])
-      assert len(image_sep_id) == 1
-      self._image_sep_id = image_sep_id[0]
-    else:
-      self._image_sep_id = None
-
     self.image_joiner = image_joiner
 
     self.preprocesser = Gpv1Preprocessor(self.webqa_templates)
@@ -121,6 +124,7 @@ class T5GPV(GPVModel):
     self.obj_cls = None
 
     # Prediction arguements
+    self.rerank_answer_options = None
     self.nms = nms
     self.beam_search_spec = None
     self.register_buffer("mask", None)
@@ -146,7 +150,8 @@ class T5GPV(GPVModel):
 
     if self.initialize_t5:
       logging.info(f"Loading pre-trained LM {self.t5_model_name}")
-      self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration.from_pretrained(self.t5_model_name)
+      self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration.\
+        from_pretrained(self.t5_model_name)
     else:
       config = AutoConfig.from_pretrained(self.t5_model_name)
       self.model = OurT5ForConditionalGeneration(config)
@@ -269,13 +274,6 @@ class T5GPV(GPVModel):
     else:
       raise NotImplementedError(self.query_box)
 
-    if self.image_seperator:
-      input_ids = torch.cat([
-        input_ids,
-        torch.full_like(input_ids[:, :1], self._image_sep_id),
-      ], 1)
-      input_mask = torch.cat([input_mask[:, :1], input_mask], 1)
-
     query_embed = self.model.shared(input_ids)
 
     query_embed, input_mask = our_utils.concat_masked_sequences(
@@ -361,8 +359,16 @@ class T5GPV(GPVModel):
   def set_prediction_args(
       self,
       beam_search_spec: BeamSearchSpec=None,
-      answer_options=None, mask=None, nms=None
+      answer_options=None, mask=None, nms=None,
+      rerank_answer_options=False
   ):
+    if rerank_answer_options:
+      if answer_options is None:
+        raise ValueError("No answer options to re-rank!")
+      self.rerank_answer_options = answer_options
+    else:
+      self.rerank_answer_options = None
+
     self.beam_search_spec = beam_search_spec
     if nms is not None:
       self.nms = nms
@@ -384,23 +390,41 @@ class T5GPV(GPVModel):
     else:
       self.register_buffer("mask", None, persistent=False)
 
+    self.register_buffer("answer_ids", None)
+
     if answer_options is not None:
-      eos = self.tokenizer.eos_token_id
-      tokenized = [encode_with_cache(x, self.tokenizer, self.tokenizer_cache) + [eos]
-                   for x in answer_options]
-      answer_mask = np.zeros((max(len(x) for x in tokenized), voc_len), dtype=np.bool)
-      for tok in tokenized:
-        answer_mask[np.arange(len(tok)), tok] = True
-      answer_mask = torch.as_tensor(answer_mask, device=device).float()
-      # Word pieces that can never be part of an answer option get a large negative weight
-      answer_mask = (1 - answer_mask) * -1e9
-      if self.mask is not None:
-        answer_mask = answer_mask + self.mask.unsqueeze(0)
-      self.register_buffer("mask", answer_mask)
+      if rerank_answer_options:
+        if beam_search_spec:
+          raise ValueError("No beam search if we just doing re-ranking")
+        tokenized_answers = self.tokenizer(
+          answer_options, return_tensors='pt', padding=True, max_length=self.model.config.n_positions)
+        labels = tokenized_answers["input_ids"].to(device)
+        if not self.predict_trailing_pad_tokens:
+          # -100 marks a label as not a target
+          labels = labels.masked_fill(labels == self.tokenizer.pad_token_id, -100)
+        self.register_buffer("answer_ids", labels, persistent=False)
+      else:
+        eos = self.tokenizer.eos_token_id
+        tokenized = [encode_with_cache(x, self.tokenizer, self.tokenizer_cache) + [eos]
+                     for x in answer_options]
+        answer_mask = np.zeros((max(len(x) for x in tokenized), voc_len), dtype=np.bool)
+        for tok in tokenized:
+          answer_mask[np.arange(len(tok)), tok] = True
+        answer_mask = torch.as_tensor(answer_mask, device=device).float()
+        # Word pieces that can never be part of an answer option get a large negative weight
+        answer_mask = (1 - answer_mask) * -1e9
+        if self.mask is not None:
+          answer_mask = answer_mask + self.mask.unsqueeze(0)
+        self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
-      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels
-  ):
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels):
+    # Use no_grad just so clients don't have to remember to
+    with torch.no_grad():
+      return self._predict(image_inputs, input_ids, input_mask, labels)
+
+  def _predict(
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels):
     task = labels.tasks[0]
     if not all(x == task for x in labels.tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
@@ -431,6 +455,35 @@ class T5GPV(GPVModel):
       for batch in range(len(input_ids)):
         text = [self.post_process_generation(x) for x in input_ids[batch]]
         out_text.append(text)
+
+    elif self.rerank_answer_options:
+      n_answers = len(self.answer_ids)
+      n_queries, enc_len, dim = encoder_outputs.last_hidden_state.size()
+      labels = self.answer_ids.unsqueeze(0).repeat(n_queries, 1, 1).view(n_queries*n_answers, -1)
+      input_mask = input_mask.unsqueeze(1).repeat(1, n_answers, 1).view(n_queries*n_answers, -1)
+      encoder_outputs.last_hidden_state = encoder_outputs.last_hidden_state.unsqueeze(1)\
+        .repeat(1, n_answers, 1, 1).view(n_queries*n_answers, enc_len, dim)
+      t5_out = self.model(
+        encoder_outputs=encoder_outputs,
+        attention_mask=input_mask,
+        labels=labels,
+        return_dict=True,
+      )
+      dec_len = labels.size(1)
+      if self.mask is not None:
+        t5_out.logits = F.log_softmax(t5_out.logits, -1) + self.mask
+      per_answer_loss = F.cross_entropy(
+        t5_out.logits.view(n_queries*n_answers*dec_len, -1),
+        labels.view(n_queries*n_answers*dec_len), reduction="none"
+      ).view(n_queries, n_answers, dec_len)
+      per_answer_loss = per_answer_loss.sum(-1).cpu().numpy()
+      answer_ranks = np.argsort(per_answer_loss, axis=1)
+      out_text = []
+      logprobs = []
+      for batch in range(n_queries):
+        out_text.append([self.rerank_answer_options[r] for r in answer_ranks[batch]])
+        # Negative convert NLL to LL
+        logprobs.append(-per_answer_loss[batch][answer_ranks[batch]])
     else:
       out_text, logprobs = None, None
 

@@ -12,6 +12,7 @@ import third_party.detection_metrics.lib.Evaluator as det_evaluator
 from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
 from exp.ours.data.coco_segmentation import SegmentationExample
+from exp.ours.data.gpv import COCO_CATEGORIES
 from exp.ours.data.gpv_example import GPVExample
 
 from exp.ours.data.dataset import VqaExample, CaptioningExample, ClsExample, LocalizationExample
@@ -22,7 +23,7 @@ from exp.ours.train.runner import GPVExampleOutput
 
 from typing import Dict, Optional, List, Counter
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from exp.ours.util import py_utils
 import numpy as np
@@ -186,6 +187,73 @@ class OpenSceClsEvaluator(PerExampleEvaluator):
     return out
 
 
+@Evaluator.register("boosting-opensce-cls")
+class BoostingOpenSceClsEvaluator(PerExampleEvaluator):
+  def __init__(self, search_range, coco_syn, top_n, sub_eval: OpenSceClsEvaluator):
+    self.search_range = search_range
+    self.sub_eval = sub_eval
+    self.coco_syn = coco_syn
+    self.top_n = top_n
+    self.coco_answer = set(COCO_CATEGORIES)
+    if self.coco_syn:
+      self.coco_answer = set(py_utils.flatten_list(SYNONYMS[x] for x in self.coco_answer))
+
+  def evaluate(
+      self,
+      examples: List,
+      predictions: Dict[str, GPVExampleOutput],
+      allow_partial=False,
+      mean=True,
+      subset_mapping=None
+  ) -> Dict[ResultKey, Number]:
+    if mean is False:
+      raise ValueError()
+
+    if self.top_n is not None:
+      for k, v in predictions.items():
+        if len(v.text) < self.top_n:
+          raise ValueError(f"Example has {len(v.text)} beams, but top n is {self.top_n}")
+      predictions = {k: v.set_beams_to_keep(self.top_n) for k, v in predictions.items()}
+    all_scores = []
+    for ex in examples:
+      p = predictions[ex.get_gpv_id()]
+      coco_ixs = []
+      for i, a in enumerate(p.text):
+        if a in self.coco_answer:
+          coco_ixs.append(i)
+      coco_ixs = np.array(coco_ixs)
+      scores = []
+      if len(coco_ixs) > 0:
+        for th in self.search_range:
+          boosted = np.array(p.text_logprobs)
+          boosted[coco_ixs] -= th
+          answer = p.text[np.argmax(boosted)]
+          scores.append(answer == ex.category)
+      else:
+        scores = [p.text[0] == ex.category] * len(self.search_range)
+      all_scores.append(scores)
+    all_scores = np.array(all_scores).mean(0)
+    best_th_ix = np.argmax(all_scores)
+    best_th = self.search_range[best_th_ix]
+
+    revised = {}
+
+    for k, p in predictions.items():
+      boosted = np.array(p.text_logprobs)
+      for i, a in enumerate(p.text):
+        if a in self.coco_answer:
+          boosted[i] -= best_th
+      re_sort = np.argsort(-boosted)
+      boosted = boosted[re_sort]
+      revised[k] = replace(p, text_logprobs=boosted, text=[p.text[i] for i in re_sort])
+
+    stats = {ResultKey(metric_name="boost"): best_th}
+    for k, v in self.sub_eval.evaluate(examples, revised, subset_mapping=subset_mapping).items():
+      stats[replace(k, metric_name=f"boost-{k.metric_name}")] = v
+    stats.update(self.sub_eval.evaluate(examples, predictions, subset_mapping=subset_mapping))
+    return {k: v for k, v in stats.items()}
+
+
 @Evaluator.register("opensce-vqa")
 class OpenSceVqaEvaluator(PerExampleEvaluator):
 
@@ -255,7 +323,8 @@ class LocalizationEvaluator(PerExampleEvaluator):
   def __init__(self, iou_thresh=0.5):
     self.iou_thresh = iou_thresh
 
-  def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput]):
+  def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput],
+                        return_pr=False):
     eval_engine = det_evaluator.Evaluator()
     out = []
 
@@ -317,7 +386,10 @@ class LocalizationEvaluator(PerExampleEvaluator):
           format=det_evaluator.BBFormat.XYWH))
 
       det_metrics = eval_engine.GetPascalVOCMetrics(all_boxes, self.iou_thresh)
-      out.append({"AP": det_metrics[0]['AP']})
+      if return_pr:
+        out.append(det_metrics[0])
+      else:
+        out.append({"AP": det_metrics[0]['AP']})
 
     return out
 
@@ -461,9 +533,9 @@ class CaptionEvaluator(Evaluator):
     res = {}
     gts = {}
     for ix, instance in enumerate(examples):
-      key = instance.gpv_id
+      key = instance.get_gpv_id()
       assert key not in res
-      res[key] = [predictions[instance.gpv_id].text[0]]
+      res[key] = [predictions[instance.get_gpv_id()].text[0]]
       gts[key] = [x.caption.lower() for x in instance.captions]
 
     res, gts = self.tokenizer.tokenize_captions(res, gts)
