@@ -27,7 +27,7 @@ class GPVExample:
   id: str
 
   """Task this example if for"""
-  task: Task
+  task: Optional[Task]
 
   """Image this is for"""
   image_id: Union[str, int]
@@ -44,11 +44,14 @@ class GPVExample:
   """Optionally for a crop of the image in [x, y, h, w] form"""
   crop: Optional[Tuple[float, float, float, float]] = None
 
-  """Optional array boxes that are part of the query in [x, y, h, w] form"""
+  """Optional array boxes that are part of the query in [x, y, w, h] form"""
   query_boxes: np.ndarray = None
 
   """Optional labels for segmentation tasks"""
   segmentation_label: Optional[SegmentationLabel] = None
+
+  """Query for deciding which boxes are relevant"""
+  relevance_query: Optional[str] = None
 
   """Optional key for grouping examples into batches"""
   sort_len: Optional[int] = None

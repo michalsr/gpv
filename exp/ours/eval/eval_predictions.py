@@ -11,16 +11,19 @@ from os.path import join, exists, isdir, dirname, basename
 from typing import Dict, List, Iterable
 
 import regex
+from allennlp.common import Params
 from dataclasses import replace
 
 from data.coco.synonyms import SYNONYMS
-from exp.ours.data.dataset import CaptioningExample, ALL_TASKS, Task
+from exp.ours.data.dataset import CaptioningExample, ALL_TASKS, Task, Dataset
 from exp.ours.data.gpv import GpvDataset, COCO_CATEGORIES
 from exp.ours.data.opensce import OpenSceDataset, OPENSCE_TASKS
 from exp.ours.data.webqa import WebQaDataset
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
-from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, LocalizationEvaluator, \
-  ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator, OpenSceClsEvaluator, OpenSceVqaEvaluator
+from exp.ours.train.evaluator import vqa_score, VqaEvaluator, CaptionEvaluator, \
+  LocalizationEvaluator, \
+  ClsEvaluator, Evaluator, ResultKey, WebQaEvaluator, OpenSceClsEvaluator, OpenSceVqaEvaluator, \
+  BoostingOpenSceClsEvaluator
 from exp.ours.train.runner import GPVExampleOutput, load_gpv_predictions
 from exp.ours.util import py_utils, our_utils
 from exp.ours.util.py_utils import FindAll
@@ -74,19 +77,27 @@ def get_eval_if_cached(eval_dir):
             stats[ResultKey(metric_name, subset)] = val
       return stats
 
-    if "version" in cached:
-      stats_str = cached["stats"]
-      stats = {}
-      for k, v in stats_str.items():
-        subset_name, metric_name = k.split("/")
-        if subset_name == "all":
-          subset_name = None
-        stats[ResultKey(metric_name, subset_name)] = v
-      return stats
+    version = cached.get("version", 0)
+    if version <= 3:
+      eval_conf = load_json_object(join(eval_dir, "config.json"))
+      ds = eval_conf["dataset"]
+      if ds["type"] == "opensce" and ds["task"] in {"cic", "cls"} and ds["part"] == "val":
+        if version <= 3:
+          # Updated to include boosting scores
+          return None
+
+    stats_str = cached["stats"]
+    stats = {}
+    for k, v in stats_str.items():
+      subset_name, metric_name = k.split("/")
+      if subset_name == "all":
+        subset_name = None
+      stats[ResultKey(metric_name, subset_name)] = v
+    return stats
   return None
 
 
-def cache_evaluation(prefix_or_dir, evaluator, stats, version=1):
+def cache_evaluation(prefix_or_dir, evaluator, stats):
   if isdir(prefix_or_dir) and not prefix_or_dir.endswith("/"):
     prefix_or_dir += "/"
   cache_file = prefix_or_dir + "eval.json"
@@ -95,7 +106,7 @@ def cache_evaluation(prefix_or_dir, evaluator, stats, version=1):
     stats=to_save,
     evaluator=to_params(evaluator, Evaluator),
     date=datetime.now().strftime("%m%d-%H%M%S"),
-    version=version,
+    version=4,
   )
   to_save_str = json.dumps(to_save, indent=2)
   with open(cache_file, "w") as f:
@@ -122,11 +133,14 @@ def get_evaluator(dataset):
     else:
       get_subsets = None
 
+    cls_eval = OpenSceClsEvaluator()
+    if dataset.part == "val":
+      cls_eval = BoostingOpenSceClsEvaluator(list(range(0, 20)), False, 20, cls_eval)
     return {
-      Task.CLS: OpenSceClsEvaluator(),
+      Task.CLS: cls_eval,
       Task.DETECTION: LocalizationEvaluator(),
       Task.VQA: OpenSceVqaEvaluator(),
-      Task.CLS_IN_CONTEXT: OpenSceClsEvaluator()
+      Task.CLS_IN_CONTEXT: cls_eval
     }[dataset.get_task()], get_subsets
 
   if isinstance(dataset, WebQaDataset):
@@ -235,6 +249,7 @@ def sort_and_remap_tsv_keys(keys: Iterable[ResultKey]) -> Dict[ResultKey, str]:
     "" if x.subset_name is None else x.subset_name,
     x.metric_name
   ))
+  cur_names = set()
   for k in keys:
     name = str(k)
     name = name.replace("-val", "").replace("-test", "")
@@ -242,6 +257,9 @@ def sort_and_remap_tsv_keys(keys: Iterable[ResultKey]) -> Dict[ResultKey, str]:
     name = name.replace("gpvsce", "cocosce")
     name = name.replace("webqa-v4-basic", "webqa")
     name = name.replace("accuracy", "acc")
+    if name in cur_names:
+      raise ValueError(f"TSV naming error {name} for {str(k)}")
+    cur_names.add(name)
     out[k] = name
   return {k: out[k] for k in _sort_keys(out)}
 
@@ -255,25 +273,38 @@ def get_hypers(h_name, model_dir):
     hyper["batch_size"] = str(trainer_data["train_loader"]["batch_size"])
 
     model_data = load_json_object(join(model_dir, "model.json"))
+    if model_data["type"] == "t5-gpv-per-box":
+      hyper["per-box"] = "True"
+
     templates = model_data.get("webqa_templates", "none")
+
+    init_from = model_data.get("initialize_from")
+    hyper["webqa-pretrain"] = "none"
+    if init_from is not None:
+      if init_from == "models/webqa/basic-ep8/r0/best-state.pth":
+        hyper["webqa-pretrain"] = "8epochs"
+      else:
+        raise NotImplementedError()
     if isinstance(templates, str):
-      hyper["webqa_templates7"] = templates
+      hyper["webqa_templates"] = templates
+    elif templates is None:
+      hyper["webqa_templates"] = "none"
     else:
-      if 'version' in templates:
+      if 'oversample_questions' not in templates:
         if templates["version"] != 0:
           raise ValueError()
         hyper["webqa_templates"] = "v0"
       else:
-        assert templates == {'oversample_questions': 3, 'oversample_test': 3}
-        hyper["webqa_templates"] = "v1"
+        hyper["webqa_templates"] = f"v{templates.get('version', 1)}"
 
     ds0 = trainer_data["train_datasets"][0]["dataset"]
-    if ds0["type"] != "gpv":
-      raise NotImplementedError()
-    hyper["sce_split"] = "True" if ds0["gpv_split"] else "False"
+    if ds0["type"] == "gpv":
+      hyper["sce_split"] = "True" if ds0["gpv_split"] else "False"
 
     ds = trainer_data["train_datasets"][-1]["dataset"]
-    if ds["type"] == "webqa":
+    if ds["type"] == "webqa-v2":
+      hyper["qtype"] = Dataset.from_params(Params(ds)).get_qtypes_name()
+    elif ds["type"] == "webqa":
       hyper["qtype"] = ds.get("question_types", "none")
       builder = trainer_data.get("train_dataset_builder")
       if builder is not None:
@@ -342,6 +373,12 @@ def main():
     for r_ix, run in enumerate(runs):
       for prefix, dataset_name in prefixes:
         model_files = find_eval_files(run, prefix)
+        if len(model_files) == 0 and prefix.startswith("webqa-v4-basic-val--"):
+          # Backwards compatiblity fix
+          model_files = find_eval_files(run, prefix.replace("webqa-v4-basic-val", "webqa-all-v2-val"))
+          if len(model_files) > 0:
+            logging.warn(f"Using old webqa results for {run}")
+
         if len(model_files) == 0:
           logging.info(f"No predictions for model {dataset_name}: {run}")
         for k, v in model_files.items():
@@ -410,10 +447,9 @@ def main():
     stats[ResultKey("n", None)] = len(pred)
 
     if args.cache:
-      cache_evaluation(eval_dir, evaluator, stats, 3)
+      cache_evaluation(eval_dir, evaluator, stats)
 
     results[(model_name, eval_name, r_ix, ds_name)] = {replace(k, dataset_name=ds_name): v for k, v in stats.items()}
-
 
   # Group results by model
   # (model_name, eval_name, dataset_name) -> run_number -> ResultKey -> value
@@ -449,17 +485,26 @@ def main():
     raise ValueError(args.hyperparameters)
 
   if args.output_tsv:
+    tsv_results = dict(per_model_results)
+    for k, v in tsv_results.items():
+      # Fix mis-named dataset
+      for key, r in list(v.items()):
+        if key.dataset_name == "webqa-all-v2-val":
+          del v[key]
+          v[replace(key, dataset_name="webqa-v4-basic-val")] = r
+    tsv_keys = set(py_utils.flatten_list(result.keys() for result in tsv_results.values()))
+
     with open(args.output_tsv, "w") as f:
-      key_map = sort_and_remap_tsv_keys(all_keys)
+      key_map = sort_and_remap_tsv_keys(tsv_keys)
       header = ["name", "eval_name"] + [str(x) for x in list(key_map.values())]
       if hypers is not None:
         header += list(hyper_keys)
       f.write("\t".join(header))
       f.write("\n")
-      for (model_name, eval_name), v in per_model_results.items():
+      for (model_name, eval_name), v in tsv_results.items():
         row = [model_name, eval_name] + [val_to_str(k, v.get(k, "-")) for k in key_map.keys()]
         if hypers is not None:
-          row += [hypers[model_name].get(key, "0.0") for key in hyper_keys]
+          row += [hypers[model_name].get(key, "-") for key in hyper_keys]
         f.write("\t".join(row))
         f.write("\n")
 

@@ -333,7 +333,7 @@ class Trainer(FromParams):
   # Saving
   save_evaluation_results: bool = True
   save_prediction_samples: Optional[int] = 0
-  save_each_epoch: bool = True
+  save_each_epoch: int = True
   best_model_key: Union[ResultKey, None, List[Union[ResultKey, Tuple[ResultKey, float]]]] = None
   eval_at_start: bool = False
   checkpoint: bool = False

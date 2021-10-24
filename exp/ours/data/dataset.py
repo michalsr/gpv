@@ -120,6 +120,10 @@ class LocalizationExample:
   category: str
   meta: Optional[Dict] = None
 
+  @property
+  def crop(self):
+    return None
+  
   def get_gpv_id(self):
     return self.gpv_id
 
@@ -141,15 +145,27 @@ class CaptioningExample:
   captions: List[Caption]
   meta: Optional[Dict[str, Any]] = None
 
+  @property
+  def crop(self):
+    return None
+
   def get_gpv_id(self):
     return self.gpv_id
 
 
+@dataclass
+@Dataset.register("in-memory-ds")
 class InMemoryDataset(Dataset):
-  def __init__(self, data, task, name):
-    self.data = data
-    self.task = task
-    self.name = name
+  data: List
+  task: Task
+  name: str
+  answer_options: Optional[Any]
+
+  def to_params(self):
+    return {}
+
+  def get_answer_options(self, synonyms=False):
+    return self.answer_options
 
   def get_task(self) -> Task:
     return self.task

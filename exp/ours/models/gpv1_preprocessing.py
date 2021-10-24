@@ -42,6 +42,8 @@ def get_stocastic_transforms(task: Task, cls_horizontal_flip=True):
 
 
 def get_train_transforms(task: Task, cls_horizontal_flip=True):
+  if task in {Task.SEGMENTATION}:
+    return None
   return T.Compose(
     [
       T.ToPILImage(mode='RGB')
@@ -124,11 +126,13 @@ CLS_QUERIES = [
 
 class Gpv1Preprocessor(FromParams):
 
-  def __init__(self, webqa_templates: Optional[WebQaQueryGenerator]=None, webqa_cls=False):
+  def __init__(self, webqa_templates: Optional[WebQaQueryGenerator]=None, webqa_cls=False,
+               relevance_query=None):
     self.webqa_templates = webqa_templates
     self.preprocess_text = None
     self.cls_queries_tok = None
     self.caption_queries_tok = None
+    self.relevance_query = relevance_query
     self.webqa_cls = webqa_cls
     self.expand_cls = webqa_cls
     self._cache = {}
@@ -143,9 +147,9 @@ class Gpv1Preprocessor(FromParams):
 
   def preprocess_example(self, example, is_train=False, include_query_box=False, include_meta=False):
     if include_query_box:
-      all_image_box = np.array([[0.0, 0.0, 1.0, 1.0]])
+      default_query_box = np.array([[0.0, 0.0, 1.0, 1.0]])
     else:
-      all_image_box = None
+      default_query_box = None
 
     # TODO ideally normalize boxes here too
     if isinstance(example, CaptioningExample):
@@ -158,7 +162,7 @@ class Gpv1Preprocessor(FromParams):
             example.image_id,
             self.caption_queries_tok,
             None,
-            query_boxes=all_image_box,
+            query_boxes=default_query_box,
             target_answer=[self.preprocess_text(cap.caption)],
             meta=cap.meta if include_meta else None
           ))
@@ -169,7 +173,7 @@ class Gpv1Preprocessor(FromParams):
           example.image_id,
           self.caption_queries_tok,
           None,
-          query_boxes=all_image_box,
+          query_boxes=default_query_box,
           target_answer=[self.preprocess_text(x.caption) for x in example.captions if x.caption is not None],
           meta=example.meta if include_meta else None
         )]
@@ -184,13 +188,23 @@ class Gpv1Preprocessor(FromParams):
         )
       )]
     elif isinstance(example, LocalizationExample):
+      if self.relevance_query is None:
+        rel_query = None
+      elif self.relevance_query == "category":
+        rel_query = example.category
+      elif self.relevance_query == "relevant":
+        rel_query = "relevant"
+      else:
+        raise NotImplementedError(self.relevance_query)
+
       out = [GPVExample(
         example.gpv_id,
         Task.DETECTION,
         example.image_id,
         [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES],
         example.bboxes,
-        query_boxes=all_image_box,
+        relevance_query=rel_query,
+        query_boxes=default_query_box,
         target_answer=None,
         meta=example.meta if include_meta else None
       )]
@@ -204,7 +218,7 @@ class Gpv1Preprocessor(FromParams):
         Task.VQA,
         example.image_id,
         [self.preprocess_text(example.question)],
-        query_boxes=all_image_box,
+        query_boxes=default_query_box,
         target_answer=None if answer is None else self.preprocess_text(answer),
         meta=example.meta if include_meta else None
       )]
@@ -223,7 +237,8 @@ class Gpv1Preprocessor(FromParams):
         example,
         query=[self.preprocess_text(example.query)],
         target_answer=None if example.target_answer is None else self.preprocess_text(example.target_answer),
-        meta=None if include_meta else example.meta
+        meta=None if include_meta else example.meta,
+        query_boxes=example.query_boxes if example.query_boxes is not None else default_query_box
       )]
     elif isinstance(example, ClsExample):
       out = [GPVExample(
@@ -232,7 +247,7 @@ class Gpv1Preprocessor(FromParams):
         example.image_id,
         self.cls_queries_tok,
         None,
-        query_boxes=all_image_box if example.query_box is None else np.array([example.query_box]),
+        query_boxes=default_query_box if example.query_box is None else np.array([example.query_box]),
         crop=example.crop,
         target_answer=self.preprocess_text(example.category),
         meta=example.meta if include_meta else None

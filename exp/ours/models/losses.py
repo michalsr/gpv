@@ -1,5 +1,5 @@
 import collections
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import numpy as np
 import torch
@@ -186,11 +186,13 @@ class BasicGPVLoss(GPVLoss):
 
   def __init__(
       self,
-      localization: LocalizationLoss, sum_seq_tokens=False
+      localization: LocalizationLoss, sum_seq_tokens=False,
+      task_weights: Optional[Dict[Task, float]] = None
   ):
     super().__init__()
     self.localization = localization
     self.sum_seq_tokens = sum_seq_tokens
+    self.task_weights = task_weights
 
   def forward(self, prediction: GpvBatchPrediction, batch_labels: GpvBatchLabels):
     task_to_ix = collections.defaultdict(list)
@@ -209,7 +211,7 @@ class BasicGPVLoss(GPVLoss):
           None if n_boxes is None else n_boxes[ixs],
           [batch_labels.box_targets[i] for i in ix_lst])
         losses.update(log)
-        total_loss += total
+        task_loss = total
       elif task == Task.SEGMENTATION:
         segmentation_labels = [batch_labels.segmentation_labels[i] for i in ix_lst]
         raise NotImplementedError()
@@ -223,6 +225,8 @@ class BasicGPVLoss(GPVLoss):
         else:
           task_loss = F.cross_entropy(task_logits.view(-1, task_logits.size(-1)), task_labels.view(-1))
         losses[str(task) + "-loss"] = task_loss
-        total_loss += task_loss
+
+      w = 1 if self.task_weights is None else self.task_weights.get(task, 1.0)
+      total_loss += task_loss * w
 
     return total_loss, losses
