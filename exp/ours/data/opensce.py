@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from os.path import join
 from typing import List
 
@@ -13,7 +14,10 @@ from utils.io import load_json_object
 import numpy as np
 
 
-OPENSCE_SYNONYMS = {k: set(v) for k, v in load_json_object(file_paths.OPENSCE_SYN).items()}
+if getattr(file_paths, "OPENSCE_SYN", None) is None:
+  OPENSCE_SYNONYMS = None
+else:
+  OPENSCE_SYNONYMS = {k: set(v) for k, v in load_json_object(file_paths.OPENSCE_SYN).items()}
 
 
 def convert_xyxy_to_xywh(box):
@@ -62,7 +66,12 @@ class OpenSceDataset(Dataset):
     return OpenSceCategories()
 
   def get_name(self) -> str:
-    return f"opensce-{self.part}-{self.task.value}"
+    if self.task == Task.CAPTIONING:
+      return f"opensce-{self.part}-{self.task.value}"
+    elif self.task == Task.VQA:
+      return f"opensce-{self.part}-{self.task.value}-v3"
+    else:
+      return f"opensce-{self.part}-{self.task.value}-v2"
 
   def load(self) -> List:
     src = join(file_paths.OPENSCE_SAMPLES, self.part, self.FILE_PATHS[self.task])
@@ -73,9 +82,10 @@ class OpenSceDataset(Dataset):
       ex_input = ex["input"]
       image_id = ex_input["image_id"]
       if self.task == Task.VQA:
+        answers = ex["meta"]["new_answers"]
         out.append(VqaExample(
-          f"opensce-vqa-{i}", f"{self.part}/visual_genome/{image_id}.jpg", ex_input["prompt"], ex["output"]["text"],
-          meta={"gpv1-unseen": ex["meta"]["category"]}))
+          f"opensce-vqa-{i}", f"{self.part}/visual_genome/{image_id}.jpg", ex_input["prompt"],
+          answers, meta={"gpv1-unseen": ex["meta"]["categories"]}))
       elif self.task in {Task.CLS, Task.CLS_IN_CONTEXT}:
         query_box = ex_input["task_coordinates"]
         assert len(query_box) == 1
@@ -89,7 +99,7 @@ class OpenSceDataset(Dataset):
         out.append(ClsExample(
           f"opensce-cls-{i}", self.task, f"{self.part}/open_images/{image_id}.jpg",
           ex["output"]["text"], query_box=query_box, crop=crop,
-          meta={"gpv1-unseen": ex["meta"]["category"], "gpv1-prompt": ex_input["prompt"]}))
+          meta={"gpv1-unseen": ex["meta"]["categories"], "gpv1-prompt": ex_input["prompt"]}))
       elif self.task == Task.CAPTIONING:
         captions = Caption(f"opensce-cap-{i}", None, meta=None)
         out.append(CaptioningExample(f"opensce-cap-{i}", f"{self.part}/nocaps/{image_id}.jpg", [captions], meta=None))

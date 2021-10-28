@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from numbers import Number
 
@@ -18,6 +19,7 @@ from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import VqaExample, CaptioningExample, ClsExample, LocalizationExample
 from exp.ours.data.opensce import OPENSCE_SYNONYMS
 from exp.ours.data.webqa import WebQaExample
+from exp.ours.train.vqa2_eval_data import *
 from exp.ours.util.image_utils import get_image_size
 from exp.ours.train.runner import GPVExampleOutput
 
@@ -31,7 +33,7 @@ import numpy as np
 from exp.ours.train.quiet_ptbtokenizer import QuitePTBTokenizer
 from utils.io import load_json_object
 from nltk.stem import WordNetLemmatizer
-
+from collections import Counter
 
 def vqa_score(answer, ground_truth_answer_counts):
   gt_answers = {k.lower(): v for k, v in ground_truth_answer_counts.items()}
@@ -187,6 +189,7 @@ class OpenSceClsEvaluator(PerExampleEvaluator):
     return out
 
 
+
 @Evaluator.register("boosting-opensce-cls")
 class BoostingOpenSceClsEvaluator(PerExampleEvaluator):
   def __init__(self, search_range, coco_syn, top_n, sub_eval: OpenSceClsEvaluator):
@@ -254,8 +257,56 @@ class BoostingOpenSceClsEvaluator(PerExampleEvaluator):
     return {k: v for k, v in stats.items()}
 
 
+def compute_vqa_accuracy(
+    gt_answers: List[str],
+    pred_answers: List[str]) -> List[float]:
+  ngt_answers = [preprocess_answer(ans) for ans in gt_answers]
+  topk_npred_answers = [preprocess_answer(ans) for ans in pred_answers]
+  gt_consensus = Counter(ngt_answers)
+  return [vqa_accuracy(ans, gt_consensus) for ans in topk_npred_answers]
+
+
+def vqa_accuracy(npred_answer: str, gt_consensus: Counter):
+  return min(gt_consensus[npred_answer]/3,1)
+
+
+def processPunctuation(inText):
+  outText = inText
+  for p in punct:
+    if (p + ' ' in inText or ' ' + p in inText) or (re.search(commaStrip, inText) != None):
+      outText = outText.replace(p, '')
+    else:
+      outText = outText.replace(p, ' ')
+  outText = periodStrip.sub("",outText,re.UNICODE)
+  return outText
+
+
+def processDigitArticle(inText):
+  outText = []
+  tempText = inText.lower().split()
+  for word in tempText:
+    word = manualMap.setdefault(word, word)
+    if word not in articles:
+      outText.append(word)
+    else:
+      pass
+  for wordId, word in enumerate(outText):
+    if word in contractions:
+      outText[wordId] = contractions[word]
+  outText = ' '.join(outText)
+  return outText
+
+
+def preprocess_answer(ans):
+  ans = ans.replace('\n', ' ')
+  ans = ans.replace('\t',' ')
+  ans = ans.lower().strip()
+  return processDigitArticle(processPunctuation(ans))
+
+
 @Evaluator.register("opensce-vqa")
-class OpenSceVqaEvaluator(PerExampleEvaluator):
+@Evaluator.register("opensce-vqa-v0")
+class OpenSceVqaEvaluatorV0(PerExampleEvaluator):
 
   nlp = spacy.load('en_core_web_sm')
   lemmatizer = WordNetLemmatizer()
@@ -312,6 +363,29 @@ class OpenSceVqaEvaluator(PerExampleEvaluator):
         for k in self.top_k:
           vals[f"top{k}-acc"] = float(any(x == gt for x in answers[:k]))
           vals[f"top{k}-iou"] = max(OpenSceVqaEvaluator.answer_match_iou(x, gt) for x in answers[:k])
+      out.append(vals)
+    return out
+
+
+@Evaluator.register("opensce-vqa-v1")
+class OpenSceVqaEvaluator(PerExampleEvaluator):
+
+  def __init__(self, top_k: Optional[List[int]]=(5,)):
+    self.top_k = top_k
+    if top_k is not None:
+      assert all(x > 0 for x in top_k)
+
+  def evaluate_examples(self, examples: List[VqaExample], predictions: Dict[str, GPVExampleOutput]):
+    out = []
+    for example in examples:
+      max_k = 1 if self.top_k is None else max(self.top_k)
+      answers = predictions[example.get_gpv_id()].text[:max_k]
+      gt = example.answers
+      scores = compute_vqa_accuracy(gt, answers)
+      vals = dict(acc=scores[0])
+      if self.top_k:
+        for k in self.top_k:
+          vals[f"top{k}-acc"] = max(scores[:k])
       out.append(vals)
     return out
 

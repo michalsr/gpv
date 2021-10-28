@@ -211,6 +211,8 @@ class Gpv1Preprocessor(FromParams):
     elif isinstance(example, VqaExample):
       if isinstance(example.answers, Counter):
         answer = max(example.answers.items(), key=lambda x: (x[1], len(x[0])))[0]
+      elif isinstance(example.answers, list):
+        answer = example.answers[0]
       else:
         answer = example.answers
       out = [GPVExample(

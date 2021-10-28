@@ -16,8 +16,8 @@ import torchvision.transforms as T
 from exp.ours import file_paths
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import Task
-from exp.ours.image_featurizer.image_featurizer import ImageCollater, get_box_targets, \
-  ImageFeatureExtractor, ImageRegionFeatures, numpy_xyxy_to_cxcywh,extract_query_boxes
+from exp.ours.image_featurizer.image_featurizer import ImageCollater, ImageFeatureExtractor, \
+  ImageRegionFeatures, gather_qboxes_and_targets, PrecomputedDataLoader
 from exp.ours.models.gpv1_preprocessing import get_stocastic_transforms
 from exp.ours.models.layers import Layer
 from exp.ours.util import image_utils, our_utils, py_utils
@@ -144,16 +144,13 @@ class VinVLPrecomputedFeatures(ImageFeatureExtractor):
 @dataclass
 class VinvlCollate(ImageCollater):
   """Collates images in way that can be passed into a VinVL model"""
-
   train_transforms: Dict[Task, Any]
   eval_transform: Any
   is_train: bool
-  box_src: str = None
   read_image_mode: str = "vinvl"
 
   def collate(self, batch: List[GPVExample]) -> Tuple[Dict[str, Any], List]:
     image_tensors = []
-    image_sizes = []
     transforms = []
     for example in batch:
       if self.is_train:
@@ -169,7 +166,6 @@ class VinvlCollate(ImageCollater):
         img = F.to_pil_image(img)
       elif self.read_image_mode == "pil":
         img = image_utils.load_image_pil(example.image_id, example.crop)
-        size = img.size[::-1]
       elif self.read_image_mode == "vinvl":
         image_f = image_utils.get_image_file(example.image_id)
         try:
@@ -179,7 +175,6 @@ class VinvlCollate(ImageCollater):
           tmp = cv2.imread(image_f)
           img = Image.open(io.BytesIO(cv2.imencode('.jpg', tmp)[1])).convert('RGB')
           img = image_utils.crop_img(img, example.crop)
-          size = img.size
         except cv2.error:
           # This load method fails for some formats (i.e., GIFs) due to limited support
           # of cv2.imread, we fall back to the more general load_image_data
@@ -187,148 +182,20 @@ class VinvlCollate(ImageCollater):
           img = F.to_pil_image(img).convert("RGB")
       else:
         raise NotImplementedError()
-      image_sizes.append(size)
       image_tensors.append(img)
 
-    if self.box_src:
-      # Load boxes from a hdf5 source
-      targets = []
-      objectness = []
-      with h5py.File(self.box_src, "r") as f:
-        for ex, sz in zip(batch, image_sizes):
-          grp = f[image_utils.get_cropped_img_key(ex.image_id, ex.crop)]
-          boxes = grp["bboxes"][:]
-          image_objectness = grp["objectness"][:]
+    qboxes, targets = gather_qboxes_and_targets(batch, qbox_format="xyxy")
+    out = [t(img, target) for img, target, t in zip(image_tensors, targets, transforms)]
+    image_tensors, targets = py_utils.transpose_lists(out)
 
-          if ex.query_boxes is not None:
-            qboxes, qobjectness = extract_query_boxes(
-              grp, ex.image_id, ex.query_boxes, "xyxy", sz, False)
-            boxes = np.concatenate([boxes, qboxes], 0)
-            image_objectness = np.concatenate([image_objectness, qobjectness], 0)
-
-          # Convert to un-normalized format expected by VinVL, boxes are already in the
-          # correct xyxy format
-          boxes *= np.array([sz[0], sz[1], sz[0], sz[1]])[None, :]
-          objectness.append(torch.as_tensor(image_objectness))
-          targets.append(BoxList(torch.as_tensor(boxes), sz))
-
-      out = [t(img, target) for img, target, t in zip(image_tensors, targets, transforms)]
-      image_tensors, targets = py_utils.transpose_lists(out)
-    else:
-      targets = None
-      objectness = None
-      image_tensors = [t(img, None)[0] for img, t in zip(image_tensors, transforms)]
-
-    if self.box_src is None:
-      # Query boxes are recorded as seperate features so clients can extract
-      # features from them
-      query_boxes = []
-      for image_tensor, example, sz in zip(image_tensors, batch, image_sizes):
-        if example.query_boxes is None:
-          query_boxes.append(None)
-        else:
-          # Resize to be proportional to the transformed image's tenspr size in xyxy format,
-          # which is the expected format for VinVL's boxes
-          tensor_h, tensor_w = image_tensor.shape[-2:]
-          if np.all(example.query_boxes <= 1.0):
-            img_w, img_h = 1.0, 1.0  # Boxes are normalized
-          else:
-            img_w, img_h = sz  # Boxes are relative to original image size
-          size_f = np.array([tensor_w/img_w, tensor_h/img_h, tensor_w/img_w, tensor_h/img_h])[None, :]
-          boxes = torch.as_tensor(example.query_boxes * size_f, dtype=torch.float32)
-          query_boxes.append(torchvision.ops.box_convert(boxes, "xywh", "xyxy"))
-    else:
-      # Query boxes are automatically appended to the other boxes
-      query_boxes = None
+    # VinVL expects boxes to be relative to the image tensors
+    for qbox, image in zip(qboxes, image_tensors):
+      tensor_h, tensor_w = image.size()[-2:]
+      size_f = torch.tensor([tensor_w, tensor_h, tensor_w, tensor_h])
+      qbox *= size_f.unsqueeze(0)
 
     images = to_image_list(image_tensors)
-    out = dict(images=images, query_boxes=query_boxes, targets=targets)
-    if objectness is not None:
-      out["objectness"] = objectness
-    box_targets = get_box_targets(batch, [x[::-1] for x in image_sizes])
-    return out, box_targets
-
-
-@ImageFeatureExtractor.register("vinvl-backbone")
-class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
-  """Builds by features by running a VinVL backbone on pre-computed boxes
-  """
-
-  def __init__(self, box_src, model="release", box_embed: Layer=None, freeze=None,
-               train_transform=None):
-    super().__init__()
-    self.model = model
-    self.box_embed = box_embed
-    self.box_src = box_src
-    self.freeze = freeze
-    self.train_transform = train_transform
-
-    vinvl, eval_transform = get_vinvl(model)
-    if train_transform is None:
-      train_transforms = {t: eval_transform for t in Task}
-    elif train_transform == "gpv1":
-
-      train_transforms = {}
-      for task in Task:
-        tr = get_stocastic_transforms(task, cls_horizontal_flip=False)
-        tr = [
-          vinvl_transforms.TransformWrapper(T.Compose(tr)),
-          vinvl_transforms.Resize(600, 1000),
-          vinvl_transforms.RandomHorizontalFlip(0.5),
-          vinvl_transforms.ToTensor(),
-          vinvl_transforms.Normalize(
-            mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_bgr255=True),
-        ]
-        train_transforms[task] = vinvl_transforms.Compose(tr)
-    else:
-      raise NotImplementedError(train_transform)
-
-    self.eval_transform = eval_transform
-    self.train_transforms = train_transforms
-
-    self.backbone = vinvl.backbone
-    self.feature_extractor = vinvl.roi_heads["box"].feature_extractor
-    self.pool = vinvl.roi_heads['box'].post_processor.avgpool
-    if self.freeze == "all":
-      for m in [self.backbone, self.pool, self.feature_extractor]:
-        for p in m.parameters():
-          p.requires_grad = False
-    elif self.freeze is not None and self.freeze != "none":
-      raise ValueError()
-
-  def get_collate(self, is_train=False) -> 'ImageCollater':
-    return VinvlCollate(self.train_transforms, self.eval_transform, is_train,
-                        image_utils.get_hdf5_image_file(self.box_src))
-
-  def forward(self, images, targets, objectness, query_boxes) -> ImageRegionFeatures:
-    images = to_image_list(images)
-    features = self.backbone(images.tensors)
-    device = images.tensors.device
-
-    if query_boxes is not None:
-      raise ValueError()
-
-    features = self.feature_extractor(features, targets)
-    features = self.pool(features)
-    features = features.squeeze(-1).squeeze(-1)
-    all_features = torch.split(features, [x.bbox.size(0) for x in targets])
-
-    all_boxes = []
-    for bbox, sz in zip(targets, images.image_sizes):
-      w, h = bbox.size
-      boxes = bbox.bbox
-      boxes = boxes/torch.as_tensor([w, h, w, h], dtype=bbox.bbox.dtype, device=device).unsqueeze(0)
-      # Clip since floating point issues can cause boxes to slightly exceed 1
-      boxes[:, 2] = torch.clip(boxes[:, 2], 0, 1)
-      boxes[:, 3] = torch.clip(boxes[:, 3], 0, 1)
-      boxes = torchvision.ops.box_convert(boxes, bbox.mode, "cxcywh")
-      all_boxes.append(boxes)
-
-    out = ImageRegionFeatures.build_from_lists(all_boxes, all_features, objectness)
-    if self.box_embed is not None:
-      box_embed = self.box_embed(out.boxes)
-      out.features = torch.cat([out.features, box_embed], -1)
-    return out
+    return dict(images=images, query_boxes=qboxes), targets
 
 
 class VinvlImageFeaturizer(ImageFeatureExtractor):
@@ -348,10 +215,10 @@ class VinvlImageFeaturizer(ImageFeatureExtractor):
   def get_collate(self, is_train=False) -> 'ImageCollater':
     return VinvlCollate(self.train_transforms, self.eval_transform, is_train)
 
-  def forward(self, images, targets, query_boxes=None) -> ImageRegionFeatures:
+  def forward(self, images, query_boxes=None) -> ImageRegionFeatures:
     device = images.tensors.device
 
-    out, backbone_features = self.vinvl(images, targets, True)
+    out, backbone_features = self.vinvl(images, None, True)
 
     if query_boxes is not None and any(x is not None for x in query_boxes):
       # Build BoxLists for the extra boxes we want features for
@@ -405,3 +272,83 @@ class VinvlImageFeaturizer(ImageFeatureExtractor):
     return ImageRegionFeatures.build_from_lists(all_boxes, all_features, conf)
 
 
+# @ImageFeatureExtractor.register("vinvl-backbone")
+# class VinvlBackboneImageFeaturizer(ImageFeatureExtractor):
+#   """Builds by features by running a VinVL backbone on pre-computed boxes
+#   """
+#
+#   def __init__(self, box_src, model="release", box_embed: Layer=None, freeze=None,
+#                train_transform=None):
+#     super().__init__()
+#     self.model = model
+#     self.box_embed = box_embed
+#     self.box_src = box_src
+#     self.freeze = freeze
+#     self.train_transform = train_transform
+#
+#     vinvl, eval_transform = get_vinvl(model)
+#     if train_transform is None:
+#       train_transforms = {t: eval_transform for t in Task}
+#     elif train_transform == "gpv1":
+#
+#       train_transforms = {}
+#       for task in Task:
+#         tr = get_stocastic_transforms(task, cls_horizontal_flip=False)
+#         tr = [
+#           vinvl_transforms.TransformWrapper(T.Compose(tr)),
+#           vinvl_transforms.Resize(600, 1000),
+#           vinvl_transforms.RandomHorizontalFlip(0.5),
+#           vinvl_transforms.ToTensor(),
+#           vinvl_transforms.Normalize(
+#             mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_bgr255=True),
+#         ]
+#         train_transforms[task] = vinvl_transforms.Compose(tr)
+#     else:
+#       raise NotImplementedError(train_transform)
+#
+#     self.eval_transform = eval_transform
+#     self.train_transforms = train_transforms
+#
+#     self.backbone = vinvl.backbone
+#     self.feature_extractor = vinvl.roi_heads["box"].feature_extractor
+#     self.pool = vinvl.roi_heads['box'].post_processor.avgpool
+#     if self.freeze == "all":
+#       for m in [self.backbone, self.pool, self.feature_extractor]:
+#         for p in m.parameters():
+#           p.requires_grad = False
+#     elif self.freeze is not None and self.freeze != "none":
+#       raise ValueError()
+#
+#   def get_collate(self, is_train=False) -> 'ImageCollater':
+#     return VinvlCollate(self.train_transforms, self.eval_transform, is_train,
+#                         image_utils.get_hdf5_image_file(self.box_src))
+#
+#   def forward(self, images, targets, objectness, query_boxes) -> ImageRegionFeatures:
+#     images = to_image_list(images)
+#     features = self.backbone(images.tensors)
+#     device = images.tensors.device
+#
+#     if query_boxes is not None:
+#       raise ValueError()
+#
+#     features = self.feature_extractor(features, targets)
+#     features = self.pool(features)
+#     features = features.squeeze(-1).squeeze(-1)
+#     all_features = torch.split(features, [x.bbox.size(0) for x in targets])
+#
+#     all_boxes = []
+#     for bbox, sz in zip(targets, images.image_sizes):
+#       w, h = bbox.size
+#       boxes = bbox.bbox
+#       boxes = boxes/torch.as_tensor([w, h, w, h], dtype=bbox.bbox.dtype, device=device).unsqueeze(0)
+#       # Clip since floating point issues can cause boxes to slightly exceed 1
+#       boxes[:, 2] = torch.clip(boxes[:, 2], 0, 1)
+#       boxes[:, 3] = torch.clip(boxes[:, 3], 0, 1)
+#       boxes = torchvision.ops.box_convert(boxes, bbox.mode, "cxcywh")
+#       all_boxes.append(boxes)
+#
+#     out = ImageRegionFeatures.build_from_lists(all_boxes, all_features, objectness)
+#     if self.box_embed is not None:
+#       box_embed = self.box_embed(out.boxes)
+#       out.features = torch.cat([out.features, box_embed], -1)
+#     return out

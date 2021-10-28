@@ -1,16 +1,20 @@
 import logging
-from typing import Union, Tuple, Dict, Optional
+from typing import Union, Tuple, Dict, Optional, Callable, List
 
 import torch
 import torchvision.ops
 from allennlp.common import Params
-from transformers import AutoTokenizer, AutoConfig
+from dataclasses import dataclass
+from transformers import AutoTokenizer, AutoConfig, PreTrainedTokenizer
 
+from exp.ours.data.dataset import Task
 from exp.ours.data.gpv import COCO_CATEGORIES
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.webqa_templates import WebQaQueryGenerator, DefaultWebQueryGenerator
 from exp.ours.models.model import GPVModel, build_per_example_output
 from exp.ours.models.gpv1_preprocessing import Gpv1Preprocessor
-from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures
+from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, ImageRegionFeatures, \
+  ImageCollater
 from exp.ours.models.layers import Layer, Linear
 from exp.ours.models.losses import GPVLoss, BasicGPVLoss, GpvBatchPrediction, GpvBatchLabels
 import numpy as np
@@ -25,8 +29,28 @@ from torch.nn import functional as F
 from exp.ours.util.to_params import to_params
 
 
-@GPVModel.register("t5-gpv")
-class T5GPV(GPVModel):
+@dataclass
+class CollateLocalizationLabels:
+  tokenizer: PreTrainedTokenizer
+
+  def collate(self, batch: List[GPVExample], out):
+    # Get the tokenized labels for each detection example
+    per_box_labels = []
+    for ex in batch:
+      if ex.task == Task.DETECTION:
+        assert ex.relevance_query is not None
+        per_box_labels.append(ex.relevance_query)
+      else:
+        per_box_labels.append(self.tokenizer.pad_token)
+
+    labels = self.tokenizer(
+      per_box_labels, return_tensors='pt', padding=True, truncation=True)
+    return dict(relevance_queries=labels["input_ids"].view(len(batch), -1))
+
+
+@GPVModel.register("t5-gpv-per-box")
+class T5GpvPerBox(GPVModel):
+  IMAGE_SEP = "[IMAGE]"
 
   @classmethod
   def from_params(
@@ -37,19 +61,12 @@ class T5GPV(GPVModel):
     # Handle various backwards compatibility issues
     if "box_aux_loss" in params:
       assert params.pop("box_aux_loss") is None
-    if "image_seperator" in params:
-      assert not params.pop("image_seperator")
-
     if "nms" in params and params["nms"] == 0.0:
       params["nms"] = None
     if "webqa_templates" not in params:
       params["webqa_templates"] = None
     if "relevance_embedding" not in params and "relevance_conditioning" in params:
       params["relevance_embedding"] = params.pop("relevance_conditioning")
-
-    if params.get("relevance_embedding") is False:
-      params["relevance_embedding"] = None
-
     if "relevance_conditioning" in params:
       # No longer supported
       assert params.pop("relevance_conditioning") is None
@@ -61,6 +78,10 @@ class T5GPV(GPVModel):
           webqa_templates["type"] = "templated-v1"
       elif "type" not in webqa_templates:
         params["webqa_templates"] = None
+
+    if "image_relevance" in params:
+      del params["image_relevance"]
+
     return super().from_params(params, **kwargs)
 
   def __init__(
@@ -69,18 +90,24 @@ class T5GPV(GPVModel):
       loss: GPVLoss,
       image_feature_extractor: ImageFeatureExtractor,
       image_joiner: Layer,
-      image_relevance: Optional[Layer]=None,
+      embed_objectness_score=False,
       initialize_t5=True, pre_tokenize=True,
       query_box=None,
       predict_trailing_pad_tokens=False,
       image_positional_bias="zero",
-      freeze_embed=False,
+      image_seperator=False,
       initialize_joiner="coco",
       nms: float=None,
       all_lower_case=False,
-      relevance_embedding: Optional[str]=None,
       webqa_templates: Optional[WebQaQueryGenerator]=None,
       initialize_from=None,
+      loc_relevance_query="category",
+      convert_to_relevance="sigmoid-logits",
+      cls_from_query_w: float=0.0,
+      use_image_sep: bool=False,
+      combine_with_objectness="multiply",
+      contrast_query=None,
+      box_context="none"
   ):
     super().__init__()
     if nms == 0.0:
@@ -88,29 +115,38 @@ class T5GPV(GPVModel):
       # threshold and some old code conflated nms=0.0 with nms=None so we disallow nms=0.0 here
       # so we can treat 0.0 as None when loading this from a parameter file.
       raise ValueError("Need nms > 0.0")
-    if freeze_embed:
-      raise NotImplementedError()
+    self.box_context = box_context
     self.all_lower_case = all_lower_case
-    self.image_relevance = image_relevance
-    self.freeze_embed = freeze_embed
     self.t5_model_name = t5_model_name
     self.loss = loss
-    self.relevance_embedding = relevance_embedding
     self.image_feature_extractor = image_feature_extractor
     self.initialize_t5 = initialize_t5
     self.predict_trailing_pad_tokens = predict_trailing_pad_tokens
     self.image_positional_bias = image_positional_bias
     self.pre_tokenize = pre_tokenize
+    self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
     self.initialize_t5 = initialize_t5
     self.query_box = query_box
     self.initialize_from = initialize_from
+    self.embed_objectness_score = embed_objectness_score
+    self.cls_from_query_w = cls_from_query_w
+    self.use_image_sep = use_image_sep
+    self.combine_with_objectness = combine_with_objectness
+    self.contrast_query = contrast_query
+    self.from_query_box = False
+    self.loc_relevance_query = loc_relevance_query
+    self.convert_to_relevance = convert_to_relevance
 
     if webqa_templates is None:
       webqa_templates = DefaultWebQueryGenerator()
     self.webqa_templates = webqa_templates
 
     self.tokenizer = AutoTokenizer.from_pretrained(self.t5_model_name)
+
+    if self.contrast_query is not None:
+      self.register_buffer("contrast_query_tok", self.tokenizer(
+        self.contrast_query, return_tensors='pt', padding=True, truncation=True)["input_ids"][0])
 
     # Speed up tokenization by caching per-token tokenization
     self.tokenizer_cache = {}
@@ -119,13 +155,20 @@ class T5GPV(GPVModel):
     # build new objects for duplicate queries/answers
     self.full_text_cache = {}
 
+    if self.image_seperator:
+      self.tokenizer.add_tokens([self.IMAGE_SEP])
+      image_sep_id = self.tokenizer.convert_tokens_to_ids([self.IMAGE_SEP])
+      assert len(image_sep_id) == 1
+      self._image_sep_id = image_sep_id[0]
+    else:
+      self._image_sep_id = None
+
     self.image_joiner = image_joiner
 
-    self.preprocesser = Gpv1Preprocessor(self.webqa_templates)
+    self.preprocesser = Gpv1Preprocessor(self.webqa_templates, relevance_query=self.loc_relevance_query)
     self.preprocesser.init(self._pre_tokenize)
 
     self.model = None
-    self.obj_cls = None
 
     # Prediction arguements
     self.rerank_answer_options = None
@@ -145,30 +188,25 @@ class T5GPV(GPVModel):
       self.full_text_cache[text] = out
       return out
 
-  def initialize(self, load_parameters=True):
-    if load_parameters and (self.initialize_t5 and self.initialize_from is None):
+  def initialize(self, load_params=True):
+    if self.initialize_from is not None:
+      logging.info(f"Initializing model from {self.initialize_from}")
+      state_dict = torch.load(self.initialize_from)
+      if state_dict["image_joiner.weight"].size() != self.image_joiner.weight.size():
+        state_dict["image_joiner.weight"] = F.pad(state_dict["image_joiner.weight"], [0, 5, 0, 0],)
+      missing_key, unexpected_key = self.load_state_dict(state_dict, strict=False)
+      logging.info(f"Missing keys {missing_key}")
+      return
+
+    if self.initialize_t5:
       logging.info(f"Loading pre-trained LM {self.t5_model_name}")
-      self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration. \
-        from_pretrained(self.t5_model_name)
+      self.model: OurT5ForConditionalGeneration = OurT5ForConditionalGeneration.from_pretrained(self.t5_model_name)
     else:
       config = AutoConfig.from_pretrained(self.t5_model_name)
       self.model = OurT5ForConditionalGeneration(config)
 
     self._init_non_pretrained()
-    self._init_joiner()
 
-    if load_parameters and self.initialize_from is not None:
-      logging.info(f"Initializing model from {self.initialize_from}")
-      state_dict = torch.load(self.initialize_from)
-      if "image_joiner.weight" in state_dict:
-        if state_dict["image_joiner.weight"].size() != self.image_joiner.weight.size():
-          logging.warning("Image joiners not compatible, no initializing from checkpoint")
-          state_dict["image_joiner.weight"] = self.image_joiner.weight.data
-          state_dict["image_joiner.bias"] = self.image_joiner.bias.data
-
-      self.load_state_dict(state_dict)
-
-  def _init_joiner(self):
     if self.initialize_joiner:
       if self.initialize_joiner == "coco":
         words = COCO_CATEGORIES
@@ -188,8 +226,19 @@ class T5GPV(GPVModel):
     t5_dim = self.model.config.d_model
     n_heads = self.model.config.num_heads
 
-    if self.image_relevance is None:
-      self.obj_cls = nn.Linear(t5_dim, 2)
+    self.relevance_rescale = nn.Linear(2, 2)
+    if self.combine_with_objectness == "multiply-rescale":
+      self.objectness_factor = nn.Linear(t5_dim, 1)
+
+    # Initialize to directly use log_probability as relevance
+    self.relevance_rescale.bias.data[:] = 0
+    self.relevance_rescale.weight.data[:] = 0
+    self.relevance_rescale.weight.data[0, 0] = 1.0
+
+    if self.embed_objectness_score:
+      self.objectness_embed = nn.Parameter(torch.zeros(t5_dim))
+    else:
+      self.objectness_embed = None
 
     if self.query_box is not None:
       self.query_embedding = nn.Parameter(torch.zeros(t5_dim).uniform_(-0.05, 0.05))
@@ -203,19 +252,15 @@ class T5GPV(GPVModel):
       self.learned_image_image_bias = None
       self.learned_text_image_bias = None
 
-    if self.relevance_embedding in {"embedding-v1", "embedding-v2"}:
-      self._relevance_embedding = nn.Parameter(torch.zeros(2, t5_dim).uniform_(-0.05, 0.05))
-    else:
-      self._relevance_embedding = None
-
-    if self.freeze_embed:
-      self.model.get_input_embeddings().weight.requires_grad = False
-      self.model.get_output_embeddings().weight.requires_grad = False
-
   def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
     if "mask" in state_dict:
       # In case it was built during `set_prediction_args` and accidentally saved
       del state_dict["mask"]
+
+    state_dict = dict(state_dict)
+    for k in list(state_dict):
+      if k.startswith("image_relevance."):
+        del state_dict[k]
 
     if self.model is None:
       config = AutoConfig.from_pretrained(self.t5_model_name)
@@ -226,16 +271,18 @@ class T5GPV(GPVModel):
     super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
   def preprocess_example_train(self, example):
-    return self.preprocesser.preprocess_example(example, True, self.query_box is not None)
+    return self.preprocess_example(example, is_train=True)
 
   def preprocess_example(self, example, is_train=False):
-    return self.preprocesser.preprocess_example(example, is_train, self.query_box is not None)
+    return self.preprocesser.preprocess_example(
+      example, is_train, self.query_box is not None)
 
   def get_collate(self, is_train=False):
     n_pos = self.model.config.n_positions
     return CollateWithTokenizer(
       self.tokenizer, self.image_feature_extractor.get_collate(is_train),
-      n_pos, n_pos, self.pre_tokenize)
+      n_pos, n_pos, self.pre_tokenize,
+      CollateLocalizationLabels(self.tokenizer))
 
   def _get_encoder_pos_bias(self, seq_len, n_image):
     input_pos_bias = None
@@ -264,13 +311,15 @@ class T5GPV(GPVModel):
 
   def _encode(self, image_inputs, input_ids, input_mask):
     image: ImageRegionFeatures = self.image_feature_extractor(**image_inputs)
-
     device = image.features.device
 
     if isinstance(self.image_joiner, Linear):
       detr_embed = self.image_joiner(image.features)
     else:
-      detr_embed = self.image_joiner(image.features)
+      detr_embed = self.image_joiner(image.features, self.model.shared)
+
+    if self.embed_objectness_score:
+      detr_embed += torch.exp(image.objectness).unsqueeze(2) * self.objectness_embed.unsqueeze(0).unsqueeze(0)
 
     if self.query_box == "always":
       # Adds a query embeddings to the query boxes
@@ -285,24 +334,19 @@ class T5GPV(GPVModel):
     else:
       raise NotImplementedError(self.query_box)
 
+    if self.image_seperator:
+      input_ids = torch.cat([
+        torch.full_like(input_ids[:, :1], self._image_sep_id),
+        input_ids,
+      ], 1)
+      input_mask = torch.cat([input_mask[:, :1], input_mask], 1)
+
     query_embed = self.model.shared(input_ids)
 
     query_embed, input_mask = our_utils.concat_masked_sequences(
       detr_embed, image.n_boxes,
       query_embed, input_mask
     )
-
-    if self.query_box == "always":
-      # Remove the query box so our output only contains the object boxes
-      if image.n_boxes is not None:
-        image.n_boxes = image.n_boxes - 1
-      image.boxes = image.boxes[:, :-1]
-      image.features = image.features[:, :-1]
-      image.objectness = image.objectness[:, :-1]
-    elif self.query_box is None:
-      pass
-    else:
-      raise NotImplementedError(self.query_box)
 
     input_pos_bias = self._get_encoder_pos_bias(input_ids.size(1), image.features.size(1))
 
@@ -314,39 +358,158 @@ class T5GPV(GPVModel):
     )
     return encoder_outputs, input_mask, image
 
-  def _image_rel(self, encoder, image: ImageRegionFeatures):
-    rel = self.image_relevance(encoder, image.objectness, image.boxes)
-    if len(rel.size()) == 2:
-      # TODO can we just use sigmoid?
-      # convert sigmoid logits -> softmax logits
-      rel = torch.stack([rel, torch.zeros_like(rel)], -1)
-    return rel
+  def _image_rel(self, image_features: ImageRegionFeatures, box_rel, contextual_embeds):
+    """Converts box-scores and image_features to relevance scores"""
+    if self.convert_to_relevance == "raw":
+      box_scores = self.relevance_rescale(box_rel)
 
-  def _rel_embedding(self, rel, encoder_outputs, image):
-    batch_size, seq_len, dim = encoder_outputs.last_hidden_state.size()
-    if self.relevance_embedding == "embedding-v1":
-      rel_probs = rel.softmax(-1)
-      rel_probs = F.pad(rel_probs, [0, 0, 0, seq_len-rel_probs.size(1), 0, 0], value=0.0)
-      encoder_outputs.last_hidden_state = (
-          encoder_outputs.last_hidden_state +
-          self._relevance_embedding[0].view(1, 1, dim) * rel_probs[:, :, :1] +
-          self._relevance_embedding[1].view(1, 1, dim) * rel_probs[:, :, 1:]
+    elif self.convert_to_relevance == "sigmoid-logits":
+      if len(box_rel.size()) == 2:
+        assert torch.all(torch.isfinite(box_rel))
+        box_rel = our_utils.log_prob_to_logits(box_rel)
+        assert torch.all(torch.isfinite(box_rel))
+      else:
+        box_rel = torch.log_softmax(box_rel, -1)
+
+      # Re-calibrate now [batch, n_boxes, 2] logits
+      box_scores = self.relevance_rescale(box_rel)
+    else:
+      raise NotImplementedError(self.convert_to_relevance)
+
+    if self.combine_with_objectness == "none":
+      pass
+    elif self.combine_with_objectness == "multiply":
+      box_scores = F.log_softmax(box_scores, -1)
+      box_scores = our_utils.log_prob_to_logits(image_features.objectness) + box_scores
+    elif self.combine_with_objectness == "multiply-rescale":
+      box_scores = F.log_softmax(box_scores, -1)
+      factor = self.objectness_factor(contextual_embeds[:, :box_rel.size(1)])
+      fe = our_utils.log_prob_to_logits(image_features.objectness)
+      box_scores = F.log_softmax(fe*factor) + box_scores
+    else:
+      raise ValueError()
+
+    return box_scores
+
+  def compute_per_box_score(
+      self, tasks, contextual_emb, n_boxes, relevance_query, input_mask,
+      include_query=False
+  ):
+    """
+    @returns [batch, n_boxes], or [batch, n_boxes, 2] if there is a contrastive query,
+    of per-box generation log-probabilities
+    """
+    device = contextual_emb.device
+    if self.use_image_sep:
+      # Make sure to include the image seperator
+      raise ValueError()
+
+    if not self.predict_trailing_pad_tokens:
+      # -100 marks a label as not a target
+      relevance_query = relevance_query.masked_fill(
+        relevance_query == self.tokenizer.pad_token_id, -100)
+
+    if not include_query:
+      assert self.query_box == "always"
+      n_boxes = n_boxes - 1
+
+    per_box_inputs_lst = []
+    per_box_outputs_lst = []
+    ixs = []
+    for i, task in enumerate(tasks):
+      if not (
+          task == Task.DETECTION or
+          (task in {Task.CLS_IN_CONTEXT, Task.CLS} and self.cls_from_query_w)
+      ):
+        continue
+      ixs.append(i)
+      assert self.query_box == "always"
+      query_start = n_boxes[i]
+      if self.box_context == "none" or self.box_context is None:
+        context = None
+      elif self.box_context == "query":
+        context = contextual_emb[i, query_start:input_mask[i].sum()]
+      else:
+        if self.box_context == "image_sep":
+          ix = query_start
+        elif self.box_context == "query_end":
+          ix = input_mask[i].sum() - 1
+        else:
+          raise ValueError()
+        context = contextual_emb[i, ix].unsqueeze(0)
+
+      box_emb = contextual_emb[i, :n_boxes[i]].unsqueeze(1)
+
+      if context is not None:
+        context = context.unsqueeze(0).repeat(box_emb.size(0), 1, 1)
+        box_emb = torch.cat([box_emb, context], 1)
+
+      per_box_inputs_lst.append(box_emb)
+      per_box_outputs_lst.append(relevance_query[i].unsqueeze(0).repeat(box_emb.size(0), 1))
+
+    # Build a tensor for the [batch, n_boxes] sparse representation we will fill out
+    if self.contrast_query is not None:
+      batched_rel_scores = torch.full(
+        (n_boxes.size(0), n_boxes.max(), 2),
+        -10000,
+        device=device, dtype=torch.float
+      )
+    else:
+      batched_rel_scores = torch.full(
+        (n_boxes.size(0), n_boxes.max()),
+        -10000,
+        device=device, dtype=torch.float
       )
 
-    elif self.relevance_embedding == "embedding-v2":
-      rel_probs = rel.softmax(-1)[:, :, 0]
-      batch_size, seq_len, dim = encoder_outputs.last_hidden_state.size()
-      rel_probs = F.pad(rel_probs, [0, seq_len-rel_probs.size(1), 0, 0], value=1.0)
-      encoder_outputs.last_hidden_state = (
-          encoder_outputs.last_hidden_state +
-          self._relevance_embedding[0].view(1, 1, dim) * rel_probs
+    if len(ixs) == 0:
+      return batched_rel_scores
+
+    per_box_inputs, per_box_mask = our_utils.stack_and_pad_blocks(per_box_inputs_lst)
+    per_box_outputs = torch.cat(per_box_outputs_lst, 0)
+    assert per_box_inputs.size(0) == per_box_outputs.size(0)
+    total_boxes = per_box_inputs.size(0)
+
+    t5_out = self.model(
+      encoder_outputs=(per_box_inputs,),
+      attention_mask=per_box_mask,
+      labels=per_box_outputs,
+      return_dict=True,
+    )
+    dim = t5_out.logits.size(-1)
+    per_label_score = F.cross_entropy(
+      t5_out.logits.view(-1, dim), per_box_outputs.view(-1), reduction="none")
+    per_label_score = -per_label_score.view(total_boxes, -1).sum(1)
+
+    if self.contrast_query is not None:
+      c_labels = self.contrast_query_tok.unsqueeze(0).repeat(total_boxes, 1)
+      contrast_query_out = self.model(
+        encoder_outputs=(per_box_inputs,),
+        attention_mask=per_box_mask,
+        labels=c_labels,
+        return_dict=True,
       )
+      c_per_label_score = F.cross_entropy(
+        contrast_query_out.logits.view(-1, dim), c_labels.view(-1), reduction="none")
+      c_per_label_score = -c_per_label_score.view(total_boxes, -1).sum(1)
+      per_label_score = torch.stack([per_label_score, c_per_label_score], -1)
 
-  def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels) -> Tuple[torch.Tensor, Dict[str, float]]:
+    on = 0
+    for i in ixs:
+      n = n_boxes[i]
+      batched_rel_scores[i, :n] = per_label_score[on:on+n]
+      on = on + n
+    assert on == len(per_label_score)
+    return batched_rel_scores
 
+  def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
+              relevance_queries) -> Tuple[torch.Tensor, Dict[str, float]]:
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
-    rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
-    self._rel_embedding(rel, encoder_outputs, image_features)
+
+    per_box_scores = self.compute_per_box_score(
+      labels.tasks, encoder_outputs.last_hidden_state,
+      image_features.get_n_boxes(), relevance_queries, input_mask, True)
+
+    rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
 
     t5_out = self.model(
       encoder_outputs=encoder_outputs,
@@ -365,13 +528,46 @@ class T5GPV(GPVModel):
 
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
     loss, monitor = self.loss(batch_pred, labels)
+
+    if not self.cls_from_query_w:
+      return loss, monitor
+
+    if len(per_box_scores.size()) == 3:
+      rel_query_scores = per_box_scores[:, :, 0]
+    else:
+      rel_query_scores = per_box_scores
+
+    # cls_tasks = [i for i, t in enumerate(labels.tasks) if t in Task.CLS]
+    # if self.cls_from_any_box and cls_tasks:
+    #   if n_boxes is not None:
+    #     rel_query_scores = torch.masked_fill(
+    #       rel_query_scores, our_utils.seq_len_to_binary_mask(n_boxes), -100000)
+    #   cls_from_any = torch.logsumexp(rel_query_scores, -1)
+    #   loss += cls_from_any
+    #   monitor["cls-from-any"] = cls_from_any
+
+    cls_tasks = [i for i, t in enumerate(labels.tasks) if t in {Task.CLS_IN_CONTEXT, Task.CLS}]
+    if self.cls_from_query_w and cls_tasks:
+      assert self.query_box == "always"
+      if n_boxes is None:
+        query_scores = rel_query_scores[cls_tasks, -1]
+      else:
+        query_scores = rel_query_scores[
+          cls_tasks,
+          n_boxes[cls_tasks] - 1
+        ]
+      assert rel_query_scores.size() == image_features.boxes.size()[:2]
+      query_score = -query_scores.mean()
+      loss += query_score * self.cls_from_query_w
+      monitor["cls-from-query"] = query_score
+
     return loss, monitor
 
   def set_prediction_args(
       self,
       beam_search_spec: BeamSearchSpec=None,
       answer_options=None, mask=None, nms=None,
-      rerank_answer_options=False
+      rerank_answer_options=False,
   ):
     if rerank_answer_options:
       if answer_options is None:
@@ -429,21 +625,36 @@ class T5GPV(GPVModel):
         self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
-      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels):
-    # Use no_grad just so clients don't have to remember to
-    with torch.no_grad():
-      return self._predict(image_inputs, input_ids, input_mask, labels)
-
-  def _predict(
-      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels):
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
+      relevance_queries=None
+  ):
     task = labels.tasks[0]
     if not all(x == task for x in labels.tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
 
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
-    rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
-    self._rel_embedding(rel, encoder_outputs, image_features)
-    rel = rel.softmax(-1)[:, :, 0]
+    if task == Task.DETECTION:
+      per_box_scores = self.compute_per_box_score(
+        labels.tasks, encoder_outputs.last_hidden_state,
+        image_features.get_n_boxes(), relevance_queries, input_mask, True)
+      rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
+      rel = rel.softmax(-1)[:, :, 0]
+    else:
+      rel = torch.exp(image_features.objectness)
+
+    # if self.from_query_box:
+    #   # Replace the encoding with the query box only encoding
+    #   query_box_inputs = []
+    #   assert self.query_box == "always"
+    #   for i, task in enumerate(labels.tasks):
+    #     if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA}:
+    #       emb = self._get_box_embed(
+    #         i, encoder_outputs.last_hidden_state, input_mask,
+    #         image_features.n_boxes, for_query=True)
+    #       assert emb.size(0) == 1
+    #       query_box_inputs.append(emb.squeeze(0))
+    #   encoder_outputs.last_hidden_state, input_mask = our_utils.stack_and_pad(
+    #     query_box_inputs, build_mask=True)
 
     if self.beam_search_spec is not None:
       if self.mask is None:

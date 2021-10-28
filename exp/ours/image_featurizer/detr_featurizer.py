@@ -1,32 +1,33 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, List
 
 import torch
 import torchvision.ops
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from exp.ours.data.dataset import Task
+from exp.ours.data.gpv_example import GPVExample
 from exp.ours.image_featurizer.image_featurizer import ImageFeatureExtractor, \
-  ImageRegionFeatures, ImageCollater, get_box_targets
+  ImageRegionFeatures, ImageCollater, gather_qboxes_and_targets, BoxTargets, ROIFeatureExtractor, \
+  PrecomputedDataLoader
 from exp.ours.models.gpv1_preprocessing import get_eval_transform, get_train_transforms
+from exp.ours.models.layers import Layer
 from exp.ours.util import image_utils
 from exp.ours.util.our_utils import get_detr_model
 from utils.detr_misc import nested_tensor_from_tensor_list
 
 
-@dataclass
-class DetrImageCollate(ImageCollater):
-  train_transforms: Dict[str, Any]
-  eval_transform: Dict[str, Any]
-  is_train: bool
-  image_size: Tuple[int, int]
-  box_format: str
-  debug: bool = False
+class Gpv1DetrLoader(ImageCollater):
+  def __init__(self, is_train, box_extractor=None):
+    super().__init__()
+    self.is_train = is_train
+    self.train_transforms = {task: get_train_transforms(task) for task in Task}
+    self.eval_transform = get_eval_transform()
+    self.image_size = (480, 640)
+    self.box_extractor = box_extractor
 
-  def collate(self, examples):
+  def collate(self, batch: List[GPVExample]) -> Tuple[Dict[str, Any], BoxTargets]:
     image_tensors = []
-    image_sizes = []
-
-    for example in examples:
+    for example in batch:
       if self.is_train:
         trans = self.train_transforms[example.task]
       else:
@@ -34,12 +35,13 @@ class DetrImageCollate(ImageCollater):
       img, size = image_utils.load_image_data(example, self.image_size)
       image_tensors.append(trans(img))
 
-      image_sizes.append(size)
-
     images = nested_tensor_from_tensor_list(image_tensors)
-
-    box_targets = get_box_targets(examples, image_sizes, self.box_format)
-    return dict(images=images), box_targets
+    if self.box_extractor is None:
+      qboxes, targets = gather_qboxes_and_targets(batch)
+      return dict(images=images, query_boxes=qboxes), targets
+    else:
+      regions, targets = self.box_extractor(batch)
+      return dict(images=images, regions=regions), targets
 
 
 @ImageFeatureExtractor.register("detr")
@@ -58,12 +60,7 @@ class PretrainedDetrFeaturizer(ImageFeatureExtractor):
     if init_relevance:
       raise NotImplementedError()
     self.detr = get_detr_model(
-      pretrained=self.pretrained_model, load_object_classifier=self.full_classifier)
-
-    self.train_transforms = {x: get_train_transforms(x) for x in Task}
-    self.eval_transform = get_eval_transform()
-    self.image_size = (480, 640)
-    self.box_format = 'cxcywh'
+      pretrained=self.pretrained_model, load_object_classifier=True)
     self._freeze()
 
   def _load_from_state_dict(self, *args, **kwargs):
@@ -85,11 +82,11 @@ class PretrainedDetrFeaturizer(ImageFeatureExtractor):
         p.requires_grad = not self.freeze_extractor
 
   def get_collate(self, is_train=False):
-    return DetrImageCollate(
-      self.train_transforms, self.eval_transform, is_train,
-      self.image_size, self.box_format)
+    return Gpv1DetrLoader(is_train)
 
-  def forward(self, images) -> ImageRegionFeatures:
+  def forward(self, images, query_boxes) -> ImageRegionFeatures:
+    if any(x is not None for x in query_boxes):
+      raise NotImplementedError("Query boxes not supported")
     out = self.detr(images)
 
     boxes = out["pred_boxes"]
@@ -105,3 +102,25 @@ class PretrainedDetrFeaturizer(ImageFeatureExtractor):
       out["detr_hs"].squeeze(0),
       out["pred_relevance_logits"]
     )
+
+
+@ImageFeatureExtractor.register("detr-with-pretrained-boxes")
+class BoxesWithDetrBackbone(ImageFeatureExtractor):
+  def __init__(self, box_source, detr_model, feature_extractor: ROIFeatureExtractor):
+    super().__init__()
+    self.box_source = box_source
+    self.feature_extractor = feature_extractor
+    self.detr_model = detr_model
+
+    self.backbone = get_detr_model(
+      pretrained=self.detr_model, load_object_classifier=True).backbone
+    self.box_ex = PrecomputedDataLoader(image_utils.get_hdf5_files(self.box_source))
+
+  def get_collate(self, is_train=False):
+    return Gpv1DetrLoader(is_train, self.box_ex)
+
+  def forward(self, images, regions) -> ImageRegionFeatures:
+    features, pos = self.backbone(images)
+    src, mask = features[-1].decompose()
+    features = self.feature_extractor.forward(src, regions.boxes)
+    return replace(regions, features=features)

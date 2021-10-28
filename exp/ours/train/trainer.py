@@ -54,10 +54,23 @@ class EvaluationSetup(FromParams):
   ):
     if "iterator" in params:
       assert params.pop("iterator") is None
+
+    # Manually build the troublesome  `prediction_args` field becaues allennlp
+    # does not handle the dictionary-of-union case
     if "beam_search" in params:
       bs = params.pop_bool("beam_search")
-      params["prediction_args"] = dict(allennlp_spec=BeamSearchSpec(**bs))
-    return super().from_params(params, constructor_to_call, constructor_to_inspect)
+      prediction_args = dict(allennlp_spec=BeamSearchSpec(**bs))
+    else:
+      prediction_args = params.pop("prediction_args")
+    params["prediction_args"] = None
+    out = super().from_params(params, constructor_to_call, constructor_to_inspect)
+    for k, v in prediction_args.items():
+      if isinstance(v, (int, float, str) or v is None):
+        pass
+      else:
+        prediction_args[k] = PredictionArg.from_params(v)
+    out.prediction_args = prediction_args
+    return out
 
   evaluator: Evaluator
   prediction_args: Dict[str, Union[PredictionArg, int, float, str, None]]
@@ -82,12 +95,18 @@ class TrainerDataset(FromParams):
 
 @dataclass
 class RunArgs(FromParams):
+
+  @classmethod
+  def from_params(cls, params: Params, constructor_to_call=None, constructor_to_inspect=None, **other):
+    if "send_model" in params:
+      del params["send_model"]
+    return super().from_params(params, constructor_to_call, constructor_to_inspect, **other)
+
   """Specifies what devices/distributed setting to train on"""
   devices: Union[str, int, List[int], None]
   seed: int
   dist_backend: str = "nccl"
   dist_url: str = 'tcp://localhost:10001'
-  send_model: str = "file"
   grad_accumulation: int = 1
   num_workers: Optional[int] = None
 
@@ -97,7 +116,7 @@ class RunArgs(FromParams):
 
   @staticmethod
   def build(args: 'DeviceArgsType', force_one_process=False,
-            grad_accumulation=1, num_workers=None, seed=None, dist_port=None):
+            grad_accumulation=1, num_workers=None, seed=None, dist_port=None, dist_backend="nccl"):
     if isinstance(args, RunArgs):
       return args
     if args is None:
@@ -119,7 +138,7 @@ class RunArgs(FromParams):
       dist_port = f'tcp://localhost:{os.environ["PYTORCH_DIST_PORT"]}'
     else:
       dist_port = f'tcp://localhost:10001'
-    return RunArgs(args, grad_accumulation=grad_accumulation,
+    return RunArgs(args, grad_accumulation=grad_accumulation, dist_backend=dist_backend,
                    num_workers=num_workers, seed=seed, dist_url=dist_port)
 
 
@@ -708,10 +727,6 @@ class Trainer(FromParams):
       # Only load train if we need to initialize the moel
       training_examples = None
 
-    if train_state_file is None:
-      logging.info("Initializing model")
-      model.initialize()
-
     if output_dir is not None:
       if run_dir is None:
         logging.info("Initializing run dir")
@@ -727,33 +742,18 @@ class Trainer(FromParams):
     if isinstance(devices, list):
       world_size = len(devices)
 
-      if isinstance(model, GPVModel):
-        # Decide how we are going to transfer the model to the workers
-        # TODO better to save an `init` checkpoint
-        if runtime.send_model == "file":
-          logging.info("Saving state for workers...")
-          state_file = "/tmp/state.pth"
-          torch.save(model.state_dict(), state_file)
-          to_send = (to_params(model, GPVModel), state_file)
-        elif runtime.send_model == "numpy":
-          state_dict = model.state_dict()
-          state_dict = {k: v.numpy() for k, v in state_dict.items()}
-          to_send = (to_params(model, GPVModel), state_dict)
-        elif runtime.send_model == "direct":
-          to_send = model
-        else:
-          raise NotImplementedError(runtime.send_model)
-      else:
-        to_send = model
-
       logging.info(f"Given {len(devices)} devices, launching {len(devices)} worker processes")
+      if isinstance(model, str):
+        to_send = model
+      else:
+        to_send = to_params(model, GPVModel)
       args = (
         self, to_send, None,
         run_dir, runtime, train_state_file, world_size
       )
       context = torch.multiprocessing.spawn(_train_worker, nprocs=world_size, args=args, join=False)
 
-      del model, training_examples
+      del training_examples
 
       while not context.join():
         pass
@@ -770,7 +770,6 @@ class Trainer(FromParams):
                     run_dir, runtime: RunArgs,
                     train_state_file: Optional[str], world_size=None, rank=0):
     """Train function that can be used in a distributed setting"""
-
     # Set the device, and do some setup if we are distributed
     if world_size is not None:
 
@@ -808,10 +807,11 @@ class Trainer(FromParams):
 
     # Now get the train state and model as objects
     if train_state_file is not None:
+      # resuming training
       logging.info("Loading train state")
       train_state: _TrainingState = torch.load(train_state_file, map_location="cpu")
 
-      # Assume the model as passed in as a file as well
+      # model is passed in as a file in this case
       logging.info("Loading model")
       with py_utils.DisableLogging():
         model = GPVModel.from_params(Params.from_file(model))
@@ -823,23 +823,21 @@ class Trainer(FromParams):
     else:
       train_state = _TrainingState()
 
-      # Get the model, it might have been passed in indirectly
-      # TODO just save an epoch zero checkpoint instead of using a seperate file
-      if isinstance(model, tuple):
+      # Get the model
+      if isinstance(model, dict):
         logging.info("Loading model")
-        # Models was sent as parameters/state
-        # State can be a file or numpy dict
-        params, state = model
+        # Models was sent as parameters
         with py_utils.DisableLogging():
-          model = GPVModel.from_params(Params(params))
-        if isinstance(state, str):
-          model.load_state_dict(torch.load(state, map_location="cpu"))
-        else:
-          state = {k: torch.as_tensor(v) for k, v in state.items()}
-          model.load_state_dict(state)
+          model = GPVModel.from_params(Params(model))
       else:
-        # Should have sent the full model
+        # Should have been sent the full model
         assert isinstance(model, GPVModel)
+
+      if is_primary():
+        logging.info("Initializing model")
+        model.initialize()
+      else:
+        model.initialize(False)
 
     if train_state.epoch != 0:
       assert train_state.global_step != 0
@@ -911,10 +909,6 @@ class Trainer(FromParams):
       if hasattr(tr_sampler, "set_epoch"):
         # Some samplers need set_epoch to be set each epoch
         tr_sampler.set_epoch(epoch)
-      if hasattr(train_loader.dataset, "set_epoch"):
-        # This supports some very experimental work I was doing with more complex datasets
-        # this is not in the main branch
-        train_loader.dataset.set_epoch(epoch)
 
       if is_primary():
         pbar = tqdm(train_loader, disable=not self.epoch_pbar, ncols=100, desc="loss=", total=n_train_batches)
@@ -924,7 +918,6 @@ class Trainer(FromParams):
         pbar = train_loader
 
       for batch in pbar:
-
         # Backprop/collect monitor information
         if runtime.grad_accumulation > 1:
           n = len(batch)

@@ -41,12 +41,14 @@ class PredictionArg(Registrable):
 
 class GPVModel(nn.Module, Registrable):
 
-  def initialize(self):
+  def initialize(self, load_params=True):
     """Initialize the model, used before training but not if loading a state dict
 
-
     This give the model a chance to load pre-trained parameters or pre-compute dataset
-    statistics that do not need to be loaded if load'i'ng an already trained model
+    statistics that do not need to be loaded if loading from a state_dict
+
+    if `load_params` is false, the model should still set up all its parameters and buffers,
+    but does not need to fill with the initialized values.
     """
     raise NotImplementedError()
 

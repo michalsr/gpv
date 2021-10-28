@@ -9,8 +9,8 @@ import numpy as np
 
 
 def main():
-  file = h5py.File(join(file_paths.CACHE_DIR, "trainval-mscoco-faster-rcnn.hdf5"), "w")
-  source_file = file_paths.FASTER_RCNN_SOURCE
+  file = h5py.File(join(file_paths.CACHE_DIR, "faster-rcnn.hdf5"), "w")
+  source_file = join(file_paths.DATA_DIR, "faster-rcnn", "trainval_36/trainval_resnet101_faster_rcnn_genome_36.tsv")
 
   with open(source_file, "r+b") as source_f:
     for line in source_f:

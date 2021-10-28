@@ -19,8 +19,6 @@ from exp.ours import file_paths
 from exp.ours.data.dataset import Task, CaptioningExample, ClsExample, LocalizationExample
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.opensce import OpenSceDataset
-from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractor, ImageRegionFeatures, \
-  MultiHdf5FeatureExtractorCollate
 from exp.ours.image_featurizer.vinvl_featurizer import VinVLPrecomputedFeatures
 from exp.ours.train.evaluator import CaptionEvaluator, vqa_score
 from exp.ours.train.runner import load_gpv_predictions, GPVExampleOutput
@@ -104,25 +102,28 @@ class HtmlVisualizer:
       html = []
       html += [f'<div style="display: inline-block; position: relative;">']
 
-      image_file = image_utils.get_image_file(image_id)
-      if crop:
-        cropped_file = image_utils.get_cropped_img_key(image_id, crop)
-        cropped_file = join("cropped", cropped_file + ".jpg")
-        cropped_full_path = join(file_paths.VISUALIZATION_DIR, cropped_file)
-        if not exists(cropped_full_path):
-          logging.info(f"Building cropped image {cropped_full_path}")
-          img = PIL.Image.open(image_file)
-          img = image_utils.crop_img(img, crop)
-          img.save(cropped_full_path)
-        src = cropped_file
-        image_w, image_h = imagesize.get(cropped_full_path)
+      if isinstance(image_id, tuple):
+        src, (image_w, image_h) = image_id
       else:
-        # TODO This depends on the details of the filepath...
-        if isinstance(image_id, str) and "/" in image_id:
-          src = self.opensce_root + "/" + image_id
+        image_file = image_utils.get_image_file(image_id)
+        if crop:
+          cropped_file = image_utils.get_cropped_img_key(image_id, crop)
+          cropped_file = join("cropped", cropped_file + ".jpg")
+          cropped_full_path = join(file_paths.VISUALIZATION_DIR, cropped_file)
+          if not exists(cropped_full_path):
+            logging.info(f"Building cropped image {cropped_full_path}")
+            img = PIL.Image.open(image_file)
+            img = image_utils.crop_img(img, crop)
+            img.save(cropped_full_path)
+          src = cropped_file
+          image_w, image_h = imagesize.get(cropped_full_path)
         else:
-          src = self.image_root + "/" + image_file.split("images/")[-1]
-        image_w, image_h = image_utils.get_image_size(image_id)
+          # TODO This depends on the details of the filepath...
+          if isinstance(image_id, str) and "/" in image_id:
+            src = self.opensce_root + "/" + image_id
+          else:
+            src = self.image_root + "/" + image_file.split("images/")[-1]
+          image_w, image_h = image_utils.get_image_size(image_id)
 
       image_attr = dict(src=src)
       if width:
