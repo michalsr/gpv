@@ -10,6 +10,7 @@ from typing import Tuple, Optional, Union
 import imagesize
 import numpy as np
 import skimage.io as skio
+import torch
 from PIL import Image
 from skimage.transform import resize
 
@@ -124,6 +125,12 @@ def crop_img(img: Union[np.ndarray, Image.Image], crop):
 def get_box_key(box):
   crop = np.array(box, dtype=np.float32).tobytes()
   return py_utils.consistent_hash(crop)
+
+
+def normalize_boxes(boxes, image_id):
+  w, h = get_image_size(image_id)
+  div = torch.as_tensor([w, h, w, h])
+  return boxes / div.unsqueeze(0)
 
 
 def get_cropped_img_key(image_id, crop=None):

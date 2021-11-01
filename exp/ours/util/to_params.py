@@ -139,10 +139,17 @@ def to_params(obj: FromParams, source_cls) -> Dict[str, Any]:
   """
   cls = obj.__class__
 
+  args = None
   if hasattr(obj, "to_params"):
-    # Class has a custom method to convert itself into parameters
-    args = obj.to_params()
-  else:
+    try:
+      # Class has a custom method to convert itself into parameters
+      args = obj.to_params()
+    except NotImplementedError:
+      # New version of allennlp give this a default `NotImplementedError` implementation,
+      # we catch it here to use our default instead
+      pass
+
+  if args is None:
     init = cls.__init__
     if init is object.__init__:
       args = {}  # No init args
