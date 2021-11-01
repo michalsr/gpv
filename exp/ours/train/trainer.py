@@ -25,7 +25,7 @@ from torch import distributed as dist
 from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
 from exp.ours.train import evaluator
 from exp.ours import file_paths
-from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler
+from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler,ImageContrastSampler
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset, Task
 from exp.ours.models.model import GPVModel
@@ -468,7 +468,12 @@ class Trainer(FromParams):
     collate_fn = CollateWithBatch(model.get_collate())
 
     to_eval = list(zip(eval_examples, self.eval_datasets))
-    to_eval += list(zip(train_examples, self.train_datasets))
+    #to_eval += list(zip(train_examples, self.train_datasets))
+
+    # for t_e, t_d in zip(train_examples,self.train_datasets):
+    #   if t_d.logging_name != 'img-contrast':
+        
+    #     to_eval += list(t_e,t_d)
 
     builder = self.eval_loader
     if builder is None:
@@ -576,9 +581,10 @@ class Trainer(FromParams):
       else:
         world_size, rank = None, None
 
-      samples = [x.train_sample for x in self.train_datasets]
-      sampler = StratifiedSubsetSampler(
-        all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
+      # samples = [x.train_sample for x in self.train_datasets]
+      # sampler = StratifiedSubsetSampler(
+      #   all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
+      sampler = ImageContrastSampler(all_train)
       shuffle = False   # Sampler does shuffling
       loader_batch_size = 1  # Sampler does batching
     else:
@@ -806,7 +812,7 @@ class Trainer(FromParams):
 
   def _load_and_log_train(self):
     """Load the training and log dataset sizes"""
-
+    print(self.train_datasets,len(self.train_datasets))
     training_examples = [x.dataset.load() for x in self.train_datasets]
 
     total = sum(len(x) for x in training_examples)
@@ -1081,6 +1087,7 @@ class Trainer(FromParams):
 
           if not is_distributed():
             for sub_batch in batch:
+              print(sub_batch,'sub batch')
               sub_batch = our_utils.to_device(sub_batch, device)
               loss, sub_monitor = model(**sub_batch)
               for k, v in _remove_tensors(sub_monitor).items():
@@ -1105,8 +1112,12 @@ class Trainer(FromParams):
           monitor = {k: v for k, v in monitor.items()}
         else:
           batch = our_utils.to_device(batch, device)
+          #print(batch,'batch')
           loss, monitor = model(**batch)
           monitor = _remove_tensors(monitor)
+          # for group in optimizer.param_groups:
+          #   for p in group['params']:
+          #     print(p.grad)
           loss.backward()
           loss = loss.item()
 

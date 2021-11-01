@@ -2,11 +2,12 @@ import json
 import logging
 import os
 from copy import deepcopy
-
+from exp.ours.data.dataset import Task, GPV1_TASKS, GPV2_TASKS
 import torch.utils.data
 from transformers import AutoConfig
-
+from exp.ours.data.gpv import GpvDataset, CocoCategories
 from exp.ours.data.webqa import WebQaDataset, WebQaNoTemmplatesDataset
+from exp.ours.data.image_contrast import ImageContrastDataset
 from exp.ours.data.webqa_templates import WebQaQueryGenerator, TemplateWebQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
@@ -37,7 +38,8 @@ def main():
   parser.add_argument("--weight_decay", type=float, default=1e-4)
   parser.add_argument("--vlr", type=float)
   parser.add_argument("--delay", type=float, default=0.0)
-
+  parser.add_argument("--image_contrast",type=str,default=None)
+  print(list(x.value for x in GPV2_TASKS))
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -104,6 +106,7 @@ def main():
       webqa_train = WebQaNoTemmplatesDataset("train", 100 if args.debug else None, qtypes)
       webqa_val = WebQaNoTemmplatesDataset("val", 100 if args.debug else None, qtypes)
     else:
+      print('hi')
       qtypes = args.webqa_subset
       qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get(qtypes, (qtypes,))
       webqa_train = WebQaDataset("val" if args.debug else "train",
@@ -123,7 +126,14 @@ def main():
     trainer.eval_datasets.append(TrainerDataset(
       webqa_val, "webqa-val", eval_sample=1314, eval_setup=webqq_eval))
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
-
+  if args.image_contrast != None:
+    loc_setup = EvaluationSetup(
+      evaluator.LocalizationEvaluator(),
+      dict(beam_search_spec=None)
+    )
+    trainer.train_datasets.append(TrainerDataset(ImageContrastDataset('train'),"img-contrast"))
+    trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=12000,eval_setup=loc_setup))
+    trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
   trainer.stratify = True
   trainer.eval_loader = deepcopy(trainer.train_loader)
 

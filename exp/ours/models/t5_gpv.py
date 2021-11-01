@@ -305,10 +305,13 @@ class T5GPV(GPVModel):
 
   def _image_rel(self, encoder, image: ImageRegionFeatures):
     rel = self.image_relevance(encoder, image.objectness, image.boxes)
+    print(rel.size(),'old rel size')
+    print(rel,'rel old')
     if len(rel.size()) == 2:
       # TODO can we just use sigmoid?
       # convert sigmoid logits -> softmax logits
       rel = torch.stack([rel, torch.zeros_like(rel)], -1)
+      print(rel,'rel new')
     return rel
 
   def _rel_embedding(self, rel, encoder_outputs, image):
