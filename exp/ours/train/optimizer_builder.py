@@ -10,7 +10,6 @@ from pytorch_transformers import WarmupLinearSchedule
 from torch import nn
 from torch.optim import AdamW, SGD
 from transformers import Adafactor
-from warmup_scheduler import GradualWarmupScheduler
 
 from exp.ours.util import py_utils
 

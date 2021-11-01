@@ -1,13 +1,21 @@
+import logging
+import math
+
 import torch
+import torchvision
 from allennlp.common import Registrable, Params
+
 from torch import nn
 from torch.nn import functional as F
+from torchvision.models._utils import IntermediateLayerGetter
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.ops.misc import FrozenBatchNorm2d
 from transformers.models.t5.modeling_t5 import T5LayerNorm
 
 from exp.gpv.models.backbone import Backbone
 from exp.gpv.models.position_encoding import PositionEmbeddingSine
 from exp.ours import file_paths
-from exp.ours.util import py_utils
+from exp.ours.util import py_utils, our_utils
 from exp.ours.util.to_params import to_params
 from utils.detr_misc import NestedTensor
 
@@ -31,6 +39,60 @@ class Linear(nn.Linear, Layer):
       out_features=self.out_features,
       bias=self.bias is not None,
     )
+
+
+@Layer.register("attenpool")
+class AttentionPool2d(Layer):
+
+  def __init__(self, spacial_dim, embed_dim, num_heads, output_dim):
+    super().__init__()
+    self.spacial_dim = spacial_dim
+    self.embed_dim = embed_dim
+    self.num_heads = num_heads
+    self.output_dim = output_dim
+
+    self.positional_embedding = nn.Parameter(torch.randn(spacial_dim ** 2 + 1, embed_dim) / embed_dim ** 0.5)
+    self.k_proj = nn.Linear(embed_dim, embed_dim)
+    self.q_proj = nn.Linear(embed_dim, embed_dim)
+    self.v_proj = nn.Linear(embed_dim, embed_dim)
+    self.c_proj = nn.Linear(embed_dim, output_dim or embed_dim)
+
+  def forward(self, x):
+    box_embed = x[:, :, -5:]
+    x = x[:, :, :-5]
+    batch, seq, dim = x.size()
+    x = x.view(-1, dim)
+    # To [NCHW] format
+    x = x.view(batch*seq, self.embed_dim, self.spacial_dim, self.spacial_dim)
+    # NCHW -> (HW)NC
+    x = x.reshape(x.shape[0], x.shape[1], x.shape[2] * x.shape[3]).permute(2, 0, 1)
+    x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
+    x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
+    x, _ = F.multi_head_attention_forward(
+      query=x, key=x, value=x,
+      embed_dim_to_check=x.shape[-1],
+      num_heads=self.num_heads,
+      q_proj_weight=self.q_proj.weight,
+      k_proj_weight=self.k_proj.weight,
+      v_proj_weight=self.v_proj.weight,
+      in_proj_weight=None,
+      in_proj_bias=torch.cat([self.q_proj.bias, self.k_proj.bias, self.v_proj.bias]),
+      bias_k=None,
+      bias_v=None,
+      add_zero_attn=False,
+      dropout_p=0,
+      out_proj_weight=self.c_proj.weight,
+      out_proj_bias=self.c_proj.bias,
+      use_separate_proj_weight=True,
+      training=self.training,
+      need_weights=False
+    )
+    x = x[0]
+    # print(x.size())
+    x = x.reshape(batch, seq, -1)
+    # print(x.size())
+    return torch.cat([x, box_embed], -1)
+
 
 
 @Layer.register("relu")
@@ -110,18 +172,14 @@ class SumWithObjectness(Layer):
         non_object_lp = torch.log1p(-torch.exp(object_lp))
       else:
         raise NotImplementedError()
+      objectness = object_lp - non_object_lp
     else:
-      # This min stops NaN occurring if the objectness score is too close to log(1) = 0
+      # Note we need eps=-1e-6 to stop NaN occurring if the objectness score is too close to log(1) = 0
       # This has occured in (very) rare cases for the VinVL model, in particular for images
       # 8cdae499db22a787a5274d4ee2255315964e1144ab3f95665144c90e24d79917
       # 597caa946a207ef96ede01a53321ff4fdf000a48707ea7c495627330b3ee4b90
-      assert torch.all(objectness <= 0.0)
-      objectness = torch.minimum(
-        objectness, torch.as_tensor([-1e-6], device=objectness.device, dtype=objectness.dtype))
-      object_lp = objectness
-      non_object_lp = torch.log1p(-torch.exp(object_lp))
+      objectness = our_utils.convert_logprob_to_sigmoid_logit(objectness, -1e-6)
 
-    objectness = object_lp - non_object_lp
     if factor is not None:
       objectness = objectness * factor
 
@@ -265,36 +323,100 @@ class LayerNorm(Layer):
     self.eps = eps
 
   def forward(self, x):
-    return F.layer_norm(x, (x.size(-1),))
+    return F.layer_norm(x, (x.size(-1),), eps=self.eps)
 
 
+@Layer.register("resnet-fpn")
+class ResnsetFPNBackbone(Layer):
+  def __init__(self, name: str, pretrain: bool, trainable_layers: int):
+    super().__init__()
+    self.name = name
+    self.pretrain = pretrain
+    self.trainable_layers = trainable_layers
+    self.model = resnet_fpn_backbone('resnet18', True, trainable_layers=3)
+
+  def forward(self, *args, **kwargs):
+    return self.model(*args, **kwargs)
+
+
+@Layer.register("detectron-backbone")
+class DetectronBackbone(Layer):
+  def __init__(self, name="COCO-Detection/faster_rcnn_R_50_C4_1x.yaml", frozenbatchnorm=True, freeze=None):
+    super().__init__()
+    self.frozenbatchnorm = frozenbatchnorm
+    self.freeze = freeze
+    self.name = name
+    logging.info(f"Loading model {name}")
+    with py_utils.DisableLogging():
+      # Keep the import here for now so the dependency is optional
+      from detectron2 import model_zoo
+      self.model = model_zoo.get(name, True).backbone
+      self.model.eval()
+      print(model_zoo.get_config(name, True).INPUT)
+      raise ValueError()
+
+  def forward(self, x):
+    if isinstance(x, NestedTensor):
+      x = x.tensors
+    out = self.model(x)
+    assert len(out) == 1
+    return list(out.values())[0]
+
+
+@Layer.register("torchvision-backbone")
 @Layer.register("detr-backbone")
-class DetrBackbone(Layer):
+class TorchvisionBackbone(Layer):
   def __init__(self, backbone="resnet50", dilation: bool=False, frozenbatchnorm=True,
                freeze=None):
     super().__init__()
     self.backbone = backbone
     self.dilation = dilation
     self.frozenbatchnorm = frozenbatchnorm
-    self.model = Backbone(backbone, True, False, dilation, frozenbatchnorm)
+
+    norm_layer = nn.BatchNorm2d
+    if frozenbatchnorm:
+      norm_layer = FrozenBatchNorm2d
+
+    return_layers = {'layer4': "0"}
+    backbone = getattr(torchvision.models, backbone)(
+      replace_stride_with_dilation=[False, False, dilation],
+      pretrained=True, norm_layer=norm_layer)
+    self.model = IntermediateLayerGetter(backbone, return_layers=return_layers)
+
     self.freeze = freeze
+
     if self.freeze == "all":
       for p in self.parameters():
         p.requires_grad = False
+
+    elif isinstance(self.freeze, int):
+      assert 0 <= self.freeze <= 5
+      to_train = 5 - self.freeze
+      layers_to_train = ['layer4', 'layer3', 'layer2', 'layer1', 'conv1'][:to_train]
+      if to_train == 5:
+        layers_to_train.append('bn1')
+      for name, parameter in self.model.named_parameters():
+        if all([not name.startswith(layer) for layer in layers_to_train]):
+          parameter.requires_grad_(False)
+
     elif self.freeze is not None and self.freeze != "none":
       raise NotImplementedError(self.freeze)
 
   def forward(self, x) -> NestedTensor:
-    return self.model(x)['0']
+    if isinstance(x, NestedTensor):
+      x = x.tensors
+    out = self.model(x)
+    assert len(out) == 1
+    return out["0"]
 
 
 @Layer.register("pretrained-detr-backbone")
-class PretrainedDetrBackbone(DetrBackbone):
+class PretrainedDetrBackbone(TorchvisionBackbone):
   def __init__(self, detr_model, freeze=None):
     super().__init__(freeze=freeze)
     self.detr_model = detr_model
     state_dict = torch.load(file_paths.PRETRAINED_DETR_MODELS[detr_model], map_location="cpu")["model"]
-    tmp = py_utils.extract_module_from_state_dict(state_dict, "backbone.0")
+    tmp = py_utils.extract_module_from_state_dict(state_dict, "backbone.0.body")
     self.model.load_state_dict(tmp)
 
 

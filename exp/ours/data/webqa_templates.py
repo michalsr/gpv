@@ -160,18 +160,13 @@ class TemplateWebQueryGenerator(WebQaQueryGenerator):
       constructor_to_inspect=None,
       **extras,
     ):
-      if "type" in params:
+      if "type" in params or "version" in params:
         params = Params({})
         logging.warning("Loading with older version, templates have changed slighly")
       return super().from_params(params, constructor_to_call, constructor_to_inspect, **extras)
 
-  def __init__(self, oversample_questions=3, oversample_test=3, use_commands=True,
-               version=2):
+  def __init__(self, oversample_questions=3, oversample_test=3, use_commands=True):
     # Precompute these
-    self.version = version
-    if version != 2:
-      logging.warning("Loading with older version, templates have changed slighly")
-
     self.use_commands = use_commands
     self.oversample_questions = oversample_questions
     self.oversample_test = oversample_test
@@ -200,8 +195,10 @@ class TemplateWebQueryGenerator(WebQaQueryGenerator):
     else:
       raise NotImplementedError(qtype)
     if not is_train:
+      # For testing always using the first template
       return out[:1]
     if self.oversample_questions is not None and any(not x.endswith("?") for x in out):
+      # Commands are often more common just because they have more templated, compensate by
       out = out + [x for x in out if x.endswith("?")]
     if self.oversample_test is not None:
       out = out + out[:1] * self.oversample_test

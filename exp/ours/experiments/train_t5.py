@@ -2,15 +2,18 @@ import json
 import logging
 import os
 from copy import deepcopy
-
+from exp.ours.data.dataset import Task, GPV1_TASKS, GPV2_TASKS
 import torch.utils.data
 from transformers import AutoConfig
 
+from exp.ours.data.opensce import OpenSceDataset
 from exp.ours.data.webqa import WebQaDataset, WebQaNoTemmplatesDataset
+from exp.ours.data.image_contrast import ImageContrastDataset
 from exp.ours.data.webqa_templates import WebQaQueryGenerator, TemplateWebQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
+from exp.ours.models.t5_gpv_per_box import T5GpvPerBox
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
@@ -19,7 +22,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from exp.ours.experiments.trainer_cli import *
 from exp.ours.data.dataset import Task
-from exp.ours.models.t5_gpv import T5GPV
 from exp.ours.util import py_utils
 
 
@@ -29,6 +31,7 @@ def main():
   parser.add_argument("--lr", type=float, default=3e-4)
   parser.add_argument("--webqa_sample", type=float, default=1.0)
   parser.add_argument("--webqa_subset",  default=None)
+  parser.add_argument("--query_box",  default="always")
   parser.add_argument("--find_unused", action="store_true")
   parser.add_argument("--init_from")
   parser.add_argument("--train_from")
@@ -37,7 +40,8 @@ def main():
   parser.add_argument("--weight_decay", type=float, default=1e-4)
   parser.add_argument("--vlr", type=float)
   parser.add_argument("--delay", type=float, default=0.0)
-
+  parser.add_argument("--image_contrast",type=str,default=None)
+  print(list(x.value for x in GPV2_TASKS))
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -47,7 +51,7 @@ def main():
   py_utils.add_stdout_logger()
 
   if args.model is None:
-    if args.debug in ["tiny", "small"]:
+    if args.debug in ["tiny", "small"] and args.init_from is None:
       args.model = "t5-small"
     else:
       args.model = "t5-base"
@@ -58,17 +62,22 @@ def main():
   t5_dim = conf.d_model
 
   localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, ['labels'])
-  model = T5GPV(
+
+  # Current best
+  model = T5GpvPerBox(
     args.model,
     loss=BasicGPVLoss(localization_loss),
     image_feature_extractor=image_featurizer,
     image_joiner=Linear(image_dim, t5_dim),
     pre_tokenize=True,
-    image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
-    query_box="always",
+    query_box=None if args.query_box == "none" else args.query_box,
     all_lower_case=True,
     webqa_templates=TemplateWebQueryGenerator(use_commands=True),
     initialize_from=args.init_from,
+    contrast_query="other",
+    convert_to_relevance="raw",
+    combine_with_objectness="multiply",
+    embed_objectness_score=False,
   )
 
   groups = [ParameterGroup(
@@ -104,6 +113,7 @@ def main():
       webqa_train = WebQaNoTemmplatesDataset("train", 100 if args.debug else None, qtypes)
       webqa_val = WebQaNoTemmplatesDataset("val", 100 if args.debug else None, qtypes)
     else:
+      print('hi')
       qtypes = args.webqa_subset
       qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get(qtypes, (qtypes,))
       webqa_train = WebQaDataset("val" if args.debug else "train",
@@ -123,7 +133,14 @@ def main():
     trainer.eval_datasets.append(TrainerDataset(
       webqa_val, "webqa-val", eval_sample=1314, eval_setup=webqq_eval))
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
-
+  if args.image_contrast != None:
+    loc_setup = EvaluationSetup(
+      evaluator.LocalizationEvaluator(),
+      dict(beam_search_spec=None)
+    )
+    trainer.train_datasets.append(TrainerDataset(ImageContrastDataset('train'),"img-contrast"))
+    trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=12000,eval_setup=loc_setup))
+    trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
   trainer.stratify = True
   trainer.eval_loader = deepcopy(trainer.train_loader)
 

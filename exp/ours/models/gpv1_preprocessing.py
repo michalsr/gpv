@@ -6,7 +6,7 @@ from exp.ours.data.gpv_example import GPVExample, SegmentationLabel
 from exp.ours.data.dataset import *
 import torchvision.transforms as T
 import numpy as np
-
+from exp.ours.data.image_contrast import ImageContrastExample
 from exp.ours.data.webqa import WebQaExample
 from exp.ours.data.webqa_templates import WebQaQueryGenerator
 
@@ -14,7 +14,7 @@ NORMALIZE_TRANSFORM = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
 
 def get_stocastic_transforms(task: Task, cls_horizontal_flip=True):
-  if task in {task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA}:
+  if task in {task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA,Task.IMAGECONTRAST}:
     transforms = [
       T.RandomApply([
         T.ColorJitter(0.4, 0.4, 0.4, 0.1)
@@ -152,7 +152,17 @@ class Gpv1Preprocessor(FromParams):
       default_query_box = None
 
     # TODO ideally normalize boxes here too
-    if isinstance(example, CaptioningExample):
+ 
+    if isinstance(example,ImageContrastExample):
+      answer = self.preprocess_text(example.answer)
+      final_answer = np.append(answer,int(example.answer))
+      #print(self.preprocess_text(example.answer).append('1'),'example answer')
+      out = [GPVExample(
+        example.gpv_id, example.task, example.image_id,
+        query=[self.preprocess_text(example.query)],
+        target_answer=final_answer,meta=example.contrast_group,index_of_class=example.answer
+      )]
+    elif isinstance(example, CaptioningExample):
       if is_train:
         out = []
         for cap in example.captions:
@@ -164,7 +174,7 @@ class Gpv1Preprocessor(FromParams):
             None,
             query_boxes=default_query_box,
             target_answer=[self.preprocess_text(cap.caption)],
-            meta=cap.meta if include_meta else None
+            meta=cap.meta if include_meta else None,index_of_class=None
           ))
       else:
         out = [GPVExample(
@@ -175,7 +185,7 @@ class Gpv1Preprocessor(FromParams):
           None,
           query_boxes=default_query_box,
           target_answer=[self.preprocess_text(x.caption) for x in example.captions if x.caption is not None],
-          meta=example.meta if include_meta else None
+          meta=example.meta if include_meta else None,index_of_class=None
         )]
     elif isinstance(example, SegmentationExample):
       out = [GPVExample(
@@ -185,7 +195,7 @@ class Gpv1Preprocessor(FromParams):
         [self.preprocess_text(x.format(example.category)) for x in SEGMENTATION_QUERIES],
         segmentation_label=SegmentationLabel(
           example.iscrowd, example.area, example.segmentation
-        )
+        ),index_of_class=None
       )]
     elif isinstance(example, LocalizationExample):
       if self.relevance_query is None:
@@ -206,11 +216,13 @@ class Gpv1Preprocessor(FromParams):
         relevance_query=rel_query,
         query_boxes=default_query_box,
         target_answer=None,
-        meta=example.meta if include_meta else None
+        meta=example.meta if include_meta else None,index_of_class=None
       )]
     elif isinstance(example, VqaExample):
       if isinstance(example.answers, Counter):
         answer = max(example.answers.items(), key=lambda x: (x[1], len(x[0])))[0]
+      elif isinstance(example.answers, list):
+        answer = example.answers[0]
       else:
         answer = example.answers
       out = [GPVExample(
@@ -220,14 +232,14 @@ class Gpv1Preprocessor(FromParams):
         [self.preprocess_text(example.question)],
         query_boxes=default_query_box,
         target_answer=None if answer is None else self.preprocess_text(answer),
-        meta=example.meta if include_meta else None
+        meta=example.meta if include_meta else None,index_of_class=None
       )]
     elif isinstance(example, WebQaExample):
       query = [self.preprocess_text(x) for x in self.webqa_templates.get_prompts(example, is_train)]
       out = [GPVExample(
         example.gpv_id, example.task, example.image_id,
         query,
-        target_answer=None if example.answer is None else self.preprocess_text(example.answer),
+        target_answer=None if example.answer is None else self.preprocess_text(example.answer),index_of_class=None
       )]
     elif isinstance(example, GPVExample):
       # Currently assume the query and answer are just text
@@ -238,7 +250,7 @@ class Gpv1Preprocessor(FromParams):
         query=[self.preprocess_text(example.query)],
         target_answer=None if example.target_answer is None else self.preprocess_text(example.target_answer),
         meta=None if include_meta else example.meta,
-        query_boxes=example.query_boxes if example.query_boxes is not None else default_query_box
+        query_boxes=example.query_boxes if example.query_boxes is not None else default_query_box,index_of_class=None
       )]
     elif isinstance(example, ClsExample):
       out = [GPVExample(
@@ -250,7 +262,7 @@ class Gpv1Preprocessor(FromParams):
         query_boxes=default_query_box if example.query_box is None else np.array([example.query_box]),
         crop=example.crop,
         target_answer=self.preprocess_text(example.category),
-        meta=example.meta if include_meta else None
+        meta=example.meta if include_meta else None,index_of_class=None
       )]
     else:
       raise NotImplementedError(example)

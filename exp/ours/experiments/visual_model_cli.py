@@ -1,12 +1,18 @@
 from argparse import ArgumentParser
 from os.path import exists
-import os
+
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
+
+from exp.ours.image_featurizer.clip_featurizer import ClipFeaturizer, RoIFeatureSource
+from exp.ours.image_featurizer.detectron_detectors import DetectronBackboneWithBoxes
+from exp.ours.image_featurizer.detr_featurizer import PretrainedDetrFeaturizer, \
+  BoxesWithDetrBackbone
 from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.image_featurizer import vinvl_featurizer
 from exp.ours.image_featurizer import detr_featurizer
-from exp.ours.image_featurizer.vinvl_featurizer import VinvlBackboneImageFeaturizer
-from exp.ours.models.layers import DetrBackbone, LayerNorm, BasicBoxEmbedder, \
-  NonLinearCoordinateEncoder
+from exp.ours.image_featurizer.vinvl_featurizer import *
+from exp.ours.models.layers import *
 
 
 def add_image_featurizer_args(parser: ArgumentParser, vfreeze="none", vmodel=None):
@@ -38,20 +44,44 @@ def get_image_featurizer(args) -> Tuple[ImageFeatureExtractor, int]:
     freeze_backbone, freeze_extractor = _freeze_detr(args.vfreeze)
     dim = 2304
     extractor = detr_featurizer.PretrainedDetrFeaturizer(
-      freeze_backbone=freeze_backbone, freeze_extractor=freeze_extractor)
-  elif args.vmodel == "faster_rcnn":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("faster-rcnn", "xyxy", BasicBoxEmbedder())
+      freeze_backbone=freeze_backbone, freeze_extractor=freeze_extractor, pretrained_model="coco")
+
   elif args.vmodel in {"dbg", "debug"}:
-    dim = 32
-    extractor = DebugFeaturizer(4, 32)
+    dim = 2048+5
+    extractor = DebugFeaturizer(50, 2048+5)
+
+  elif args.vmodel == "clip":
+    # dim = 1285
+    # extractor = ClipFeaturizer(
+    #   "RN50x4", "vinvl", [
+    #     RoIFeatureSource(1, (7, 7,)),
+    #     RoIFeatureSource(2, (3, 3,)),
+    #     RoIFeatureSource(3, (1, 1,)),
+    #   ],
+    #   freeze="all",
+    #   coordinate_embedder=BasicBoxEmbedder(),
+    # )
+    #
+    dim = 10240//4*9 + 5
+    extractor = ClipFeaturizer(
+      "RN50x4", "vinvl", [
+        # RoIFeatureSource(1, (3, 3,), aggregate="flatten"),
+        # RoIFeatureSource(2, (2, 2,), aggregate="flatten"),
+        RoIFeatureSource(3, (3, 3,), aggregate="flatten"),
+        # RoIFeatureSource(3, (3, 3,), aggregate="flatten"),
+      ],
+      freeze="all",
+      coordinate_embedder=BasicBoxEmbedder(),
+    )
+
   elif args.vmodel == "vinvl-precomputed":
     if args.vfreeze != "all":
       raise ValueError()
-    dim = 2054
+    dim = 2053
     extractor = vinvl_featurizer.VinVLPrecomputedFeatures()
+  elif args.vmodel == "dbg-hdf5":
+    dim = 2048
+    extractor = Hdf5FeatureExtractor("dbg")
   elif args.vmodel == "dbg-hdf5":
     dim = 2048
     extractor = Hdf5FeatureExtractor("dbg")
@@ -60,45 +90,14 @@ def get_image_featurizer(args) -> Tuple[ImageFeatureExtractor, int]:
       raise ValueError()
     dim = 2048 + 5
     extractor = Hdf5FeatureExtractor("vinvl", box_embedder=BasicBoxEmbedder())
-  elif args.vmodel == "coco-vinvl":  # winvl-web
-    if args.vfreeze != "all":
-      raise ValueError()
+  elif args.vmodel == "vboxes-detr":
     dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl", box_embedder=BasicBoxEmbedder())
-  elif args.vmodel == "vinvl-r50c4-4setvg":
-    if args.vfreeze != "all":
-      raise ValueError()
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl-r50c4-4setvg", "xyxy", BasicBoxEmbedder())
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes":
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl-r50c4-4setvg-rboxes", box_embedder=BasicBoxEmbedder())
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes-all-image":
-    dim = 2048 + 5
-    extractor = Hdf5FeatureExtractor("vinvl-r50c4-4setvg-rboxes-all-image", box_embedder=BasicBoxEmbedder(),
-                                     all_image_box=True, all_image_prior=-10000)
-  elif args.vmodel == "vinvl-r50c4-4setvg-rboxes-bk":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer(
-      "vinvl", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze, train_transform="gpv1")
-  elif args.vmodel == "vinvl-r50c4-4setvg-bk":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer("vinvl-r50c4-5setvg", "R50C4_4setsvg", BasicBoxEmbedder(), args.vfreeze)
-  elif args.vmodel == "vinvl_backbone":
-    dim = 2048 + 5
-    extractor = VinvlBackboneImageFeaturizer("vinvl", "release", BasicBoxEmbedder(), args.vfreeze)
-  elif args.vmodel in {"detr_boxes", "vinvl_boxes"}:
-    dim = 2048 + 4*7
-    extractor = FromPrecomputedBoxes(
-      {"detr_boxes": "detr-coco-sce", "vinvl_boxes": "vinvl-boxes"}[args.vmodel],
-      DetrBackbone(freeze=args.vfreeze),
-      feature_extractor=BoxEmbedFeatureExtractor(
-        box_coordinate_embed=NonLinearCoordinateEncoder([0.1, 0.05, 0.02]),
+    extractor = BoxesWithDetrBackbone(
+      "vinvl", "coco",
+      feature_extractor=BoBoxEmbedFeatureExtractor(
+        box_coordinate_embed=BasicBoxEmbedder(),
         post_rio=LayerNorm(),
       ),
-      include_all_image_box=True,
-      horizontal_flip=0.5,
-      preload_bboxes=True,
     )
   else:
     raise NotImplementedError(args.vmodel)

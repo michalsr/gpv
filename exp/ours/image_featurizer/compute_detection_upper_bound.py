@@ -9,7 +9,9 @@ from tqdm import tqdm
 from exp.ours.data.dataset import Task
 from exp.ours.data.gpv import GpvDataset
 from exp.ours.data.gpv_example import GPVExample
-from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractorCollate
+from exp.ours.data.opensce import OpenSceDataset
+# from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractorCollate
+from exp.ours.image_featurizer.image_featurizer import Hdf5FeatureExtractor, PrecomputedDataLoader
 from exp.ours.util import image_utils, py_utils
 
 import numpy as np
@@ -25,30 +27,44 @@ def main():
   args = parser.parse_args()
   py_utils.add_stdout_logger()
 
-  col = Hdf5FeatureExtractorCollate(
-    image_utils.get_hdf5_image_file(args.features), args.format, return_features=False)
-  instances = GpvDataset(Task.DETECTION, args.part, sample=args.sample).load()
+  if args.features.endswith("hdf5"):
+    f = args.features
+  else:
+    f = image_utils.get_hdf5_image_file("opensce", args.features)
 
-  with h5py.File(col.source_file, "r") as f:
+  col = PrecomputedDataLoader([f], extract_features=False)
+  instances = OpenSceDataset(Task.DETECTION, args.part, sample=args.sample).load()
+
+  with h5py.File(f, "r") as f:
     filtered = [x for x in instances if image_utils.get_cropped_img_key(x.image_id, x.crop) in f]
   if len(filtered) != len(instances):
     logging.info(f"Missing {len(instances)-len(filtered)} instances, evaluating on {len(filtered)}")
     instances = filtered
+  else:
+    logging.info(f"All examples found")
 
   pbar = tqdm(total=len(instances), ncols=100)
   iou_upper_bound = []
 
+
   while len(instances) > 0:
     batch = instances[:50]
     instances = instances[50:]
-    fe = col.collate([GPVExample("", Task.DETECTION, ex.image_id, None, ex.bboxes)
-                     for ex in batch])[0]
-    boxes = fe["features"].boxes
+    regions = col([GPVExample("", Task.DETECTION, ex.image_id, None, ex.bboxes) for ex in batch])[0]
+    boxes = regions.boxes
     for ex, boxes in zip(batch, boxes):
       boxes = torchvision.ops.box_convert(boxes, "cxcywh", "xyxy")
-      w, h = image_utils.get_image_size(ex.image_id)
-      gt = torch.as_tensor(ex.bboxes / np.array([w, h, w, h]).reshape((1, -1)))
+      gt = torch.as_tensor(ex.bboxes)
+      assert torch.all(gt <= 1.0)
+      assert torch.all(boxes <= 1.0)
+      # if torch.any(boxes > 1.0):
+      #   w, h = image_utils.get_image_size(ex.image_id)
+      #   gt = torch.as_tensor(ex.bboxes / np.array([w, h, w, h]).reshape((1, -1)))
+      # else:
       gt = torchvision.ops.box_convert(gt, "xywh", "xyxy")
+      # gt = torchvision.ops.box_convert(torch.as_tensor(ex.bboxes), "xywh", "xyxy")
+
+      # print(gt, boxes)
       iou_upper_bound.append(torch.any(torchvision.ops.box_iou(gt, boxes) > 0.5, -1).float().mean().item())
       pbar.update(1)
 
