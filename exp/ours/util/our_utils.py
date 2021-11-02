@@ -24,7 +24,7 @@ IMPORT_DONE = False
 def import_all():
   global IMPORT_DONE
   if not IMPORT_DONE:
-    for k in ["models", "train", "image_featurizer", "experimental"]:
+    for k in ["models", "train", "image_featurizer"]:
       import_module_and_submodules(f"exp.ours.{k}")
     IMPORT_DONE = True
 
