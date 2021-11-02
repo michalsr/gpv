@@ -107,9 +107,12 @@ class T5GpvPerBox(GPVModel):
       use_image_sep: bool=False,
       combine_with_objectness="multiply",
       contrast_query=None,
-      box_context="none"
+      box_context="none",
   ):
     super().__init__()
+    if cls_from_query_w != 0:
+      raise NotImplementedError()
+
     if nms == 0.0:
       # While this is technically possible, it doesn't really make sense to do nms with a 0.0
       # threshold and some old code conflated nms=0.0 with nms=None so we disallow nms=0.0 here
@@ -127,6 +130,8 @@ class T5GpvPerBox(GPVModel):
     self.image_seperator = image_seperator
     self.initialize_joiner = initialize_joiner
     self.initialize_t5 = initialize_t5
+    if query_box == "none":
+      query_box = None
     self.query_box = query_box
     self.initialize_from = initialize_from
     self.embed_objectness_score = embed_objectness_score
@@ -358,6 +363,19 @@ class T5GpvPerBox(GPVModel):
     )
     return encoder_outputs, input_mask, image
 
+  def _get_rel_logprob(self, objectness):
+    if len(objectness.size()) == 2:
+      objectness = our_utils.log_prob_to_logits(objectness)
+    else:
+      if objectness.size(2) > 2:
+        non_object_lp = F.log_softmax(objectness, -1)[:, :, -1]
+        object_lp = torch.log1p(-torch.exp(non_object_lp))
+        objectness = torch.stack([object_lp, non_object_lp], -1)
+      else:
+        assert objectness.size(2) == 2
+        objectness = F.log_softmax(objectness, -1)
+    return objectness
+
   def _image_rel(self, image_features: ImageRegionFeatures, box_rel, contextual_embeds):
     """Converts box-scores and image_features to relevance scores"""
     if self.convert_to_relevance == "raw":
@@ -376,16 +394,17 @@ class T5GpvPerBox(GPVModel):
     else:
       raise NotImplementedError(self.convert_to_relevance)
 
+    objectness = self._get_rel_logprob(image_features.objectness)
+
     if self.combine_with_objectness == "none":
       pass
     elif self.combine_with_objectness == "multiply":
       box_scores = F.log_softmax(box_scores, -1)
-      box_scores = our_utils.log_prob_to_logits(image_features.objectness) + box_scores
+      box_scores = objectness + box_scores
     elif self.combine_with_objectness == "multiply-rescale":
       box_scores = F.log_softmax(box_scores, -1)
       factor = self.objectness_factor(contextual_embeds[:, :box_rel.size(1)])
-      fe = our_utils.log_prob_to_logits(image_features.objectness)
-      box_scores = F.log_softmax(fe*factor) + box_scores
+      box_scores = objectness*factor + box_scores
     else:
       raise ValueError()
 
@@ -410,29 +429,25 @@ class T5GpvPerBox(GPVModel):
         relevance_query == self.tokenizer.pad_token_id, -100)
 
     if not include_query:
-      assert self.query_box == "always"
-      n_boxes = n_boxes - 1
+      if self.query_box is not None:
+        assert self.query_box == "always"
+        n_boxes = n_boxes - 1
 
     per_box_inputs_lst = []
     per_box_outputs_lst = []
     ixs = []
     for i, task in enumerate(tasks):
-      if not (
-          task == Task.DETECTION or
-          (task in {Task.CLS_IN_CONTEXT, Task.CLS} and self.cls_from_query_w)
-      ):
+      if not (task == Task.DETECTION):
         continue
       ixs.append(i)
-      assert self.query_box == "always"
-      query_start = n_boxes[i]
       if self.box_context == "none" or self.box_context is None:
         context = None
       elif self.box_context == "query":
+        assert self.query_box == "always"
+        query_start = n_boxes[i]
         context = contextual_emb[i, query_start:input_mask[i].sum()]
       else:
-        if self.box_context == "image_sep":
-          ix = query_start
-        elif self.box_context == "query_end":
+        if self.box_context == "query_end":
           ix = input_mask[i].sum() - 1
         else:
           raise ValueError()
@@ -529,39 +544,8 @@ class T5GpvPerBox(GPVModel):
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
     loss, monitor = self.loss(batch_pred, labels)
 
-    if not self.cls_from_query_w:
-      return loss, monitor
-
-    if len(per_box_scores.size()) == 3:
-      rel_query_scores = per_box_scores[:, :, 0]
-    else:
-      rel_query_scores = per_box_scores
-
-    # cls_tasks = [i for i, t in enumerate(labels.tasks) if t in Task.CLS]
-    # if self.cls_from_any_box and cls_tasks:
-    #   if n_boxes is not None:
-    #     rel_query_scores = torch.masked_fill(
-    #       rel_query_scores, our_utils.seq_len_to_binary_mask(n_boxes), -100000)
-    #   cls_from_any = torch.logsumexp(rel_query_scores, -1)
-    #   loss += cls_from_any
-    #   monitor["cls-from-any"] = cls_from_any
-
-    cls_tasks = [i for i, t in enumerate(labels.tasks) if t in {Task.CLS_IN_CONTEXT, Task.CLS}]
-    if self.cls_from_query_w and cls_tasks:
-      assert self.query_box == "always"
-      if n_boxes is None:
-        query_scores = rel_query_scores[cls_tasks, -1]
-      else:
-        query_scores = rel_query_scores[
-          cls_tasks,
-          n_boxes[cls_tasks] - 1
-        ]
-      assert rel_query_scores.size() == image_features.boxes.size()[:2]
-      query_score = -query_scores.mean()
-      loss += query_score * self.cls_from_query_w
-      monitor["cls-from-query"] = query_score
-
     return loss, monitor
+
 
   def set_prediction_args(
       self,
@@ -625,6 +609,12 @@ class T5GpvPerBox(GPVModel):
         self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels, relevance_queries=None):
+    # Use no_grad just so clients don't have to remember to
+    with torch.no_grad():
+      return self._predict(image_inputs, input_ids, input_mask, labels, relevance_queries)
+
+  def _predict(
       self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
       relevance_queries=None
   ):
@@ -640,21 +630,11 @@ class T5GpvPerBox(GPVModel):
       rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
       rel = rel.softmax(-1)[:, :, 0]
     else:
-      rel = torch.exp(image_features.objectness)
-
-    # if self.from_query_box:
-    #   # Replace the encoding with the query box only encoding
-    #   query_box_inputs = []
-    #   assert self.query_box == "always"
-    #   for i, task in enumerate(labels.tasks):
-    #     if task in {Task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA}:
-    #       emb = self._get_box_embed(
-    #         i, encoder_outputs.last_hidden_state, input_mask,
-    #         image_features.n_boxes, for_query=True)
-    #       assert emb.size(0) == 1
-    #       query_box_inputs.append(emb.squeeze(0))
-    #   encoder_outputs.last_hidden_state, input_mask = our_utils.stack_and_pad(
-    #     query_box_inputs, build_mask=True)
+      if len(image_features.objectness.size()) == 3:
+        objectness = self._get_rel_logprob(image_features.objectness)
+        rel = F.softmax(objectness, -1)[:, :, 0]
+      else:
+        rel = torch.exp(image_features.objectness)
 
     if self.beam_search_spec is not None:
       if self.mask is None:

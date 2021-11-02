@@ -12,6 +12,7 @@ from exp.ours.data.webqa_templates import WebQaQueryGenerator, TemplateWebQueryG
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
+from exp.ours.models.t5_gpv import T5GPV
 from exp.ours.models.t5_gpv_per_box import T5GpvPerBox
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
@@ -78,6 +79,19 @@ def main():
     embed_objectness_score=False,
   )
 
+  # model = T5GPV(
+  #   args.model,
+  #   loss=BasicGPVLoss(localization_loss),
+  #   image_feature_extractor=image_featurizer,
+  #   image_joiner=Linear(image_dim, t5_dim),
+  #   pre_tokenize=True,
+  #   image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
+  #   query_box=None if args.query_box == "none" else args.query_box,
+  #   all_lower_case=True,
+  #   webqa_templates=TemplateWebQueryGenerator(use_commands=True),
+  #   initialize_from=args.init_from,
+  # )
+
   groups = [ParameterGroup(
     AllParameters(),
     group_name="other",
@@ -131,12 +145,6 @@ def main():
       webqa_val, "webqa-val", eval_sample=50 if args.debug else 12000, eval_setup=webqq_eval))
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
 
-  trainer.eval_datasets.append(TrainerDataset(
-    OpenSceDataset(Task.DETECTION, "val", 100 if args.debug else None),
-    "odet", eval_sample=None,
-    eval_setup=trainer.evaluation[Task.DETECTION]
-  ))
-
   trainer.stratify = True
   trainer.eval_loader = deepcopy(trainer.train_loader)
 
@@ -149,6 +157,7 @@ def main():
   trainer.train_loader.persist_workers = False
   trainer.eval_loader.persist_workers = False
   trainer.find_unused_parameters = args.find_unused
+
   run_trainer_from_args(trainer, model, args)
 
 
