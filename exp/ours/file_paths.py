@@ -24,6 +24,7 @@ WEBQA_ALL_FIFTH_ANSWERS = join(CACHE_DIR, "webqa_fifth_answers.json")
 
 GPV_DIR = join(DATA_DIR, "gpv")
 WEBQA_DIR = join(GPV_DIR, "learning_phase_data/web_20")
+IMAGECONTRAST_DIR = "/data/michal5/image_contrast"
 COCO_IMAGES = join(GPV_DIR, "learning_phase_data/coco/images")
 
 PRETRAINED_DETR_MODELS = {

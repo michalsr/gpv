@@ -15,6 +15,7 @@ class Task(FromParams, enum.Enum):
   CLS_IN_CONTEXT = "cic"
   WEBQA = "webqa"
   SEGMENTATION = "seg"
+  IMAGECONTRAST = "imagecontrast"
 
   @classmethod
   def from_params(

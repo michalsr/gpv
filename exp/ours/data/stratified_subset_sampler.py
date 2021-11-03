@@ -1,6 +1,6 @@
 import logging
 from typing import List, Union, Optional
-
+import torch 
 from torch.utils.data import Dataset as TorchDataset, Sampler
 
 import numpy as np
@@ -145,3 +145,49 @@ class StratifiedSubsetSampler(Sampler):
       s, e = self.bounds[self.rank]
       return e - s
 
+class ImageContrastSampler():
+  """Naive sampler for image contrast. We need to make sure that each batch contains images from the same category. 
+  - Compute map from categories to indicies
+  - Find random permutation of categories 
+  - Yield whole categories at a time 
+  """
+  def __init__(self,training_examples):
+    self.training_examples = training_examples
+    self.max_cat = -1
+    self.cat_to_index = self.categories_to_indicies()
+    self.cat_order = torch.randperm(self.max_cat+1)
+    print(self.max_cat)
+  def __len__(self):
+    return self.max_cat 
+  def categories_to_indicies(self):
+    cat_to_index = {}
+    max_cat = -1 
+    for idx,t in enumerate(self.training_examples):
+      cat = t.meta
+      index = idx 
+      if cat not in cat_to_index:
+        cat_to_index[cat] = []
+      cat_to_index[cat].append(idx)
+      if int(cat)>self.max_cat:
+        self.max_cat =cat
+
+    return cat_to_index
+  def __iter__(self):
+    for cat in self.cat_order.tolist():
+      batch = []
+      if cat in self.cat_to_index.keys():
+        for idx in self.cat_to_index[cat]:
+          batch.append(torch.tensor([idx]))
+      else:
+        continue
+      batch = torch.stack(batch)
+      #for b in batch:
+        #print(self.training_examples[b])
+      # if len(batch.size()) >1:
+      #   print(batch)
+     
+      #print(batch,'actual batch indicies')
+      if batch.size()[0]<16:
+        continue
+
+      yield batch 

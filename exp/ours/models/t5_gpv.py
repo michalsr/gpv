@@ -346,7 +346,7 @@ class T5GPV(GPVModel):
       )
 
   def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels) -> Tuple[torch.Tensor, Dict[str, float]]:
-
+    print('hello')
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
     rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
     self._rel_embedding(rel, encoder_outputs, image_features)
@@ -365,6 +365,7 @@ class T5GPV(GPVModel):
 
     boxes = image_features.boxes
     n_boxes = image_features.n_boxes
+    print(t5_out.logits.size(),'t5 out logits size')
 
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
     loss, monitor = self.loss(batch_pred, labels)
@@ -447,7 +448,7 @@ class T5GPV(GPVModel):
     rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
     self._rel_embedding(rel, encoder_outputs, image_features)
     rel = rel.softmax(-1)[:, :, 0]
-
+    print(rel.size(),'relevance size')
     if self.beam_search_spec is not None:
       if self.mask is None:
         post_process = None

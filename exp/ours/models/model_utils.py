@@ -85,10 +85,12 @@ class CollateWithTokenizer(Callable):
       else:
         queries.append(q)
         answers.append(a)
+    #print(len(queries),'query length 1')
 
     image_data = self.image_collater.collate(batch)
     image_inputs, box_targets = image_data
-
+    #print(len(box_targets),'box targets')
+    #print(image_inputs.size(),'image inputs size')
     if self.pre_tokenized:
       queries = prepare_batch_from_pre_encoded(
         queries, self.tokenizer, self.q_len, truncation=True)
@@ -105,12 +107,12 @@ class CollateWithTokenizer(Callable):
       segmentation_labels = [None for _ in batch]
     else:
       segmentation_labels = [None for _ in batch]
-
+    #print(len(batch),'batch size here')
     labels = GpvBatchLabels(
       [x.task for x in batch],
       answers["input_ids"],
       box_targets,
-      segmentation_labels=segmentation_labels
+      segmentation_labels=segmentation_labels,index_of_class=[x.index_of_class for x in batch]
     )
 
     out = dict(

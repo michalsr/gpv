@@ -20,7 +20,7 @@ def add_dataset_args(parser: ArgumentParser, sample=True,
                       required=task_default is None,
                       choices=[str(x) for x in GPV2_TASKS] +
                               ["o" + x.value for x in OPENSCE_TASKS] +
-                              ["webqa-fifth", "webqa", "segmentation"] +
+                              ["webqa-fifth", "webqa", "segmentation","det"] +
                               ["all", "gpv1", "gpv2", "gpv2-eval", "opensce"], nargs="+")
   if sample:
     parser.add_argument("--sample", type=int)
@@ -61,6 +61,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=Non
   gpv_tasks = set()
   segmentation = False
   webqa = False
+
   for dataset in args.datasets:
     if dataset == "gpv1":
       gpv_tasks.update(GPV1_TASKS)
@@ -82,6 +83,8 @@ def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=Non
       gpv_tasks.add(Task(dataset))
     elif dataset[0] == "o" and dataset[1:] in {x.value for x in OPENSCE_TASKS}:
       open_sce_tasks.add(Task(dataset[1:]))
+    elif dataset == 'det':
+      gpv_tasks.add(Task('det'))
     else:
       raise NotImplementedError(dataset)
 

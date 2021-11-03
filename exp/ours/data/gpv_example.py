@@ -56,6 +56,8 @@ class GPVExample:
   """Optional key for grouping examples into batches"""
   sort_len: Optional[int] = None
 
+  index_of_class: Optional[str] = None
+
   meta: Any = None
 
   def get_gpv_id(self):

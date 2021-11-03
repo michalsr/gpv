@@ -33,6 +33,7 @@ class SetCriterion(nn.Module):
         """
         super().__init__()
         self.num_classes = num_classes
+        print(self.num_classes)
         self.matcher = matcher
         self.weight_dict = weight_dict
         self.eos_coef = eos_coef
@@ -47,18 +48,29 @@ class SetCriterion(nn.Module):
         """
         assert 'pred_relevance_logits' in outputs
         src_logits = outputs['pred_relevance_logits']
+        print(self.num_classes,'num classes')
+        # print(src_logits.size(),'logit size')
+        # print(src_logits,'src logits')
+        # print(src_logits.transpose(1,2),'transposed')
+        #print(targets,'targets')
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        #print(target_classes_o.size(),'target classes 0')
         target_classes = torch.full(src_logits.shape[:2], self.num_classes,
                                     dtype=torch.int64, device=src_logits.device)
+        #print(target_classes,'new target classes empty')
         target_classes[idx] = target_classes_o
+        #print(target_classes,'target classes filled')
 
         if "n_boxes" in outputs:
             n_boxes = outputs["n_boxes"]
             seq_ix = torch.arange(n_boxes, device=n_boxes.device, dtype=n_boxes.dtype)
             invalid = seq_ix.unsqueeze(0) >= n_boxes.unsqueeze(0)
             target_classes = target_classes.masked_fill(invalid, -100)
-
+        #print(src_logits.transpose(1,2),'transposed logits')
+        #print(target_classes.size(),'target_classes')
+        print(target_classes,'target classes')
+        print(src_logits.transpose(1,2).size(),'new size')
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
         losses = {'loss_ce': loss_ce}
 

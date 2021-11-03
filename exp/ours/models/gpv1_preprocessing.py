@@ -156,6 +156,7 @@ class Gpv1Preprocessor(FromParams):
     if isinstance(example,ImageContrastExample):
       answer = self.preprocess_text(example.answer)
       final_answer = np.append(answer,int(example.answer))
+      #print(example.contrast_group)
       #print(self.preprocess_text(example.answer).append('1'),'example answer')
       out = [GPVExample(
         example.gpv_id, example.task, example.image_id,

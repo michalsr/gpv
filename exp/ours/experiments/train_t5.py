@@ -14,6 +14,7 @@ from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get
 from exp.ours.models.layers import *
 from exp.ours.models.losses import *
 from exp.ours.models.t5_gpv_per_box import T5GpvPerBox
+from exp.ours.models.t5_gpv import T5GPV
 from exp.ours.train.evaluator import ResultKey
 from exp.ours.train.optimizer_builder import AllParameters, OptimizerBuilder, \
   DelayedWarmupScheduleBuilder, ParameterGroup, AdamWBuilder
@@ -139,7 +140,7 @@ def main():
       dict(beam_search_spec=None)
     )
     trainer.train_datasets.append(TrainerDataset(ImageContrastDataset('train'),"img-contrast"))
-    trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=12000,eval_setup=loc_setup))
+    trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=4857,eval_setup=loc_setup))
     trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
   trainer.stratify = True
   trainer.eval_loader = deepcopy(trainer.train_loader)

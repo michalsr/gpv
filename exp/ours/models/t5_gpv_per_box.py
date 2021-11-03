@@ -310,6 +310,7 @@ class T5GpvPerBox(GPVModel):
     return input_pos_bias
 
   def _encode(self, image_inputs, input_ids, input_mask):
+   
     image: ImageRegionFeatures = self.image_feature_extractor(**image_inputs)
     device = image.features.device
 
@@ -504,11 +505,11 @@ class T5GpvPerBox(GPVModel):
   def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
               relevance_queries) -> Tuple[torch.Tensor, Dict[str, float]]:
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
-
+    #print(len(input_ids),'input ids')
     per_box_scores = self.compute_per_box_score(
       labels.tasks, encoder_outputs.last_hidden_state,
       image_features.get_n_boxes(), relevance_queries, input_mask, True)
-
+    #print(per_box_scores.size(),'per box scores size')
     rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
 
     t5_out = self.model(
@@ -525,7 +526,7 @@ class T5GpvPerBox(GPVModel):
 
     boxes = image_features.boxes
     n_boxes = image_features.n_boxes
-
+    #print(rel.size(),'relevance size')
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
     loss, monitor = self.loss(batch_pred, labels)
 

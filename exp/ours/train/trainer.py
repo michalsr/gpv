@@ -13,7 +13,7 @@ import torch
 from numbers import Number
 from os.path import join, exists, dirname
 from typing import List, Optional, Dict, Any, Union, Tuple
-
+from exp.ours.data.image_contrast import ImageContrastDataset
 from allennlp.common import FromParams, Params, Registrable
 from allennlp.common.util import lazy_groups_of
 from dataclasses import dataclass, replace
@@ -212,12 +212,7 @@ class RunArgs(FromParams):
   devices: Union[str, int, List[int], None]
   seed: int
   dist_backend: str = "nccl"
-<<<<<<< HEAD
-  dist_url: str = 'file:///shared/rsaas/michal5/gpv_michal/none'
-  send_model: str = "file"
-=======
   dist_url: str = 'tcp://localhost:10001'
->>>>>>> 91f3d77eba2ede3e0c63db119ad6c25386e84377
   grad_accumulation: int = 1
   num_workers: Optional[int] = None
 
@@ -248,13 +243,8 @@ class RunArgs(FromParams):
     elif "PYTORCH_DIST_PORT" in os.environ:
       dist_port = f'tcp://localhost:{os.environ["PYTORCH_DIST_PORT"]}'
     else:
-<<<<<<< HEAD
       dist_port = f'tcp://localhost:64801'
     return RunArgs(args, grad_accumulation=grad_accumulation,
-=======
-      dist_port = f'tcp://localhost:10001'
-    return RunArgs(args, grad_accumulation=grad_accumulation, dist_backend=dist_backend,
->>>>>>> 91f3d77eba2ede3e0c63db119ad6c25386e84377
                    num_workers=num_workers, seed=seed, dist_url=dist_port)
 
 
@@ -433,38 +423,47 @@ class Trainer(FromParams):
     with py_utils.DisableLogging():
       trainer = Trainer.from_params(Params.from_file(join(output_dir, "trainer.json")))
     model_file = join(output_dir, "model.json")
-    train_datasets, eval_datasets, evaluation,other_log = get_datasets()
+    loc_setup = EvaluationSetup(
+      evaluator.LocalizationEvaluator(),
+      dict(beam_search_spec=None)
+    )
+    trainer.train_datasets = []
+    trainer.eval_datasets = []
+    trainer.train_datasets.append(TrainerDataset(ImageContrastDataset('train'),"img-contrast"))
+    trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=4857,eval_setup=loc_setup))
+    trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+    #train_datasets, eval_datasets, evaluation,other_log = get_datasets()
     #trainer.train_datasets = train_datasets
     #trainer.eval_datasets = eval_datasets
-    trainer.evaluation = evaluation
-    trainer.train_val_log = list(other_log.items())
-    qtypes = "basic"
-    qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get("basic",("basic",))
-    webqa_train = WebQaDataset("train",None,qtypes)
-    webqa_val = WebQaDataset("val",None,qtypes)
-    webqq_eval = EvaluationSetup(
-         evaluator.WebQaEvaluator(),
-         dict(beam_search_spec=BeamSearchSpec(1,5),answer_options=webqa_train.get_answer_options(False)))
-    #trainer.train_datasets.append(TrainerDataset(webqa_train,"webqa-tr",train_sample=0.2,eval_sample=3000,eval_setup=webqq_eval))
-    for i,e in enumerate(trainer.eval_datasets):
-        print(e.logging_name,e.logging_name=='webqa-val')
-        if e.logging_name == 'webqa-val':
-          ind_remove=i
-          print(ind_remove,'ind rmeove')
-          e.eval_setup = webqq_eval
-    for i,e in enumerate(trainer.train_datasets):
-        if e.logging_name == 'webqa-tr':
-          print(trainer.train_datasets[i])
-          ind_remove_2 = i
-          e.eval_setup = webqq_eval
-          print(e.eval_setup)
-    #trainer.eval_datasets.pop(ind_remove)
-    #trainer.train_datasets.pop(ind_remove_2)
-    #trainer.train_datasets.append(TrainerDataset(webqa_train,"webqa-tr",train_sample=0.2,eval_sample=3000,eval_setup=webqq_eval))
-    #trainer.eval_datasets.append(TrainerDataset(webqa_val,"webqa-val",12000,eval_setup=webqq_eval))
-    trainer.best_model_key.append(ResultKey("accuracy",dataset_name="webqa-val"))
-    print(len(trainer.train_datasets),trainer.train_datasets[-1])
-    print(len(trainer.eval_datasets),trainer.eval_datasets[0])
+    # trainer.evaluation = evaluation
+    # trainer.train_val_log = list(other_log.items())
+    # qtypes = "basic"
+    # qtypes = WebQaDataset.QTYPES_NAME_TO_TYPES.get("basic",("basic",))
+    # webqa_train = WebQaDataset("train",None,qtypes)
+    # webqa_val = WebQaDataset("val",None,qtypes)
+    # webqq_eval = EvaluationSetup(
+    #      evaluator.WebQaEvaluator(),
+    #      dict(beam_search_spec=BeamSearchSpec(1,5),answer_options=webqa_train.get_answer_options(False)))
+    # #trainer.train_datasets.append(TrainerDataset(webqa_train,"webqa-tr",train_sample=0.2,eval_sample=3000,eval_setup=webqq_eval))
+    # for i,e in enumerate(trainer.eval_datasets):
+    #     print(e.logging_name,e.logging_name=='webqa-val')
+    #     if e.logging_name == 'webqa-val':
+    #       ind_remove=i
+    #       print(ind_remove,'ind rmeove')
+    #       e.eval_setup = webqq_eval
+    # for i,e in enumerate(trainer.train_datasets):
+    #     if e.logging_name == 'webqa-tr':
+    #       print(trainer.train_datasets[i])
+    #       ind_remove_2 = i
+    #       e.eval_setup = webqq_eval
+    #       print(e.eval_setup)
+    # #trainer.eval_datasets.pop(ind_remove)
+    # #trainer.train_datasets.pop(ind_remove_2)
+    # #trainer.train_datasets.append(TrainerDataset(webqa_train,"webqa-tr",train_sample=0.2,eval_sample=3000,eval_setup=webqq_eval))
+    # #trainer.eval_datasets.append(TrainerDataset(webqa_val,"webqa-val",12000,eval_setup=webqq_eval))
+    # trainer.best_model_key.append(ResultKey("accuracy",dataset_name="webqa-val"))
+    # print(len(trainer.train_datasets),trainer.train_datasets[-1])
+    # print(len(trainer.eval_datasets),trainer.eval_datasets[0])
     checkpoint_file = join(run_dir, "checkpoint.pth")
 
     run_args = RunArgs.build(device)
@@ -856,8 +855,8 @@ class Trainer(FromParams):
     eval_examples = [x.dataset.load() for x in self.eval_datasets]
 
     total_eval = 0
-    all_eval = (list(zip(eval_examples, self.eval_datasets)) +
-                list(zip(training_examples, self.train_datasets)))
+    all_eval = (list(zip(eval_examples, self.eval_datasets))) 
+    #+list(zip(training_examples, self.train_datasets)))
     for (examples, ds) in all_eval:
       if ds.eval_sample:
         total_eval += ds.eval_sample
@@ -1114,8 +1113,9 @@ class Trainer(FromParams):
           loss = total_loss / n
           monitor = {k: v for k, v in monitor.items()}
         else:
+
           batch = our_utils.to_device(batch, device)
-          #print(batch,'batch')
+          #print(batch,'second batch')
           loss, monitor = model(**batch)
           monitor = _remove_tensors(monitor)
           # for group in optimizer.param_groups:

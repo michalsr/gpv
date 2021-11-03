@@ -24,6 +24,7 @@ class GpvBatchLabels:
   text_labels: torch.Tensor
   box_targets: List
   segmentation_labels: List
+  index_of_class: str
 
   # support `to` and `pin_memory` so this object can be used in a torch.DataLoader
   def to(self, device):
@@ -150,7 +151,8 @@ class DetrLocalizationLoss(LocalizationLoss):
       ))
 
     losses = self.set_criterion(outputs, target_dicts)
-    to_return = ['loss_ce', 'loss_bbox', 'loss_giou']
+    to_return = ['loss_ce']
+    # to_return = ['loss_ce', 'loss_bbox', 'loss_giou']
     out = {}
     total_loss = 0
     for k in to_return:
@@ -160,6 +162,25 @@ class DetrLocalizationLoss(LocalizationLoss):
       out[k] = v
       total_loss += v * self.loc_weights[k]
     return total_loss, out
+
+
+# class ImageContrastLoss(GPVLoss):
+#   def __init__(self):
+#         super().__init__()
+#   def forward(self,logits,batch_labels):
+#     top_1_logits = []
+#     for pred in logits:
+#       max_logit = torch.max(pred)
+#       top_1_logits.append(max_logit)
+#     final_logits = torch.FloatTensor(top_1_logits)
+#     target_index = batch_labels[0]
+#     one_hot = self.make_one_hot(target_index)
+#     loss = F.cross_entropy(final_logits,one_hot)
+#     return loss 
+#   def make_one_hot(self,class_id):
+#     label = torch.zeros(16)
+#     label[class_id] = 1
+#     return label 
 
 
 @GPVLoss.register("basic-gpv-loss")
@@ -193,7 +214,56 @@ class BasicGPVLoss(GPVLoss):
     self.localization = localization
     self.sum_seq_tokens = sum_seq_tokens
     self.task_weights = task_weights
+    #self.contrast_loss = contrast_loss 
+  def make_one_hot(self,class_id):
+    label = torch.zeros(16)
+    label[class_id] = 1
+    return label 
+  def check_max_values(self,pred):
+    max_val = -1 
+    for p in pred:
+      if p[1]>max_val:
+        max_val = p[1]
+    return max_val 
+  def check_min_values(self,pred):
+    min_val = 1000000000
+    for p in pred:
+      if p[0] < min_val:
+        min_val = p[0]
+    return min_val 
+  def contrastive_loss(self,logits,batch_labels):
+    
+    # print(logits,'logits')
+    # print(logits.size(),'logits size')
+    # print(batch_labels.index_of_class,'index of class')
+    # for i,pred in enumerate(logits):
+    #   max_val = self.check_max_values(pred)
+     
+    #   max_logit = torch.max(pred)
+    #   top_1_logits[i] = max_val
+    # top_1_logits = torch.max()
+    #logits[:,:,0] = -100
+    new_logits = logits[:,:,0]
+    #print(new_logits,'new logits')
+    #new_logits += 1e-10 
+    top_1_logits,_  = torch.max(new_logits,dim=(1))
+    #print(top_1_logits)
+    final_logits = torch.cuda.FloatTensor(top_1_logits).to("cuda:0")
+    #print(batch_labels,'batch labels'
+    target_index = int(batch_labels.index_of_class[0])
+    #print(target_index,'target index')
+    # target_index = batch_labels[0][-2]
+    # if target_index>16:
+    #   target_idex = batch_labels[0][2]
+    # print(target_index,batch_labels,'target index')
 
+    t_index = torch.cuda.FloatTensor([float(target_index)]).to("cuda:0")
+    print(t_index,'t index')
+    print(final_logits.size(),'final logits')
+
+    loss = F.cross_entropy(torch.unsqueeze(final_logits,0).cuda(),t_index.long()).cuda()
+
+    return loss 
   def forward(self, prediction: GpvBatchPrediction, batch_labels: GpvBatchLabels):
     task_to_ix = collections.defaultdict(list)
     for i, task in enumerate(batch_labels.tasks):
@@ -212,6 +282,16 @@ class BasicGPVLoss(GPVLoss):
           [batch_labels.box_targets[i] for i in ix_lst])
         losses.update(log)
         task_loss = total
+      elif task == Task.IMAGECONTRAST:
+        loss = self.contrastive_loss(prediction.pred_rel[ixs],batch_labels)
+        losses[str(task) + "-loss"] = loss
+        task_loss = loss
+        # total, log = self.localization(
+        #   prediction.pred_boxes[ixs], prediction.pred_rel[ixs],
+        #   None if n_boxes is None else n_boxes[ixs],
+        #   [batch_labels.box_targets[i] for i in ix_lst])
+        # losses.update(log)
+        # task_loss = total
       elif task == Task.SEGMENTATION:
         segmentation_labels = [batch_labels.segmentation_labels[i] for i in ix_lst]
         raise NotImplementedError()
