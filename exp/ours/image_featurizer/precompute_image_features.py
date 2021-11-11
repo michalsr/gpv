@@ -20,6 +20,7 @@ from exp.ours.data.gpv import GpvDataset
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import Task, ClsExample, GPV2_TASKS
 from exp.ours.data.opensce import OPENSCE_TASKS, OpenSceDataset
+from exp.ours.data.webqa import WebQaDataset
 from exp.ours.experiments.datasets_cli import add_dataset_args, get_datasets_from_args
 from exp.ours.image_featurizer.detectron_detectors import DetectronObjectDetector
 from exp.ours.image_featurizer.detr_featurizer import PretrainedDetrFeaturizer
@@ -211,7 +212,35 @@ def main():
   default_query_box = None if args.no_query else (0, 0, 1.0, 1.0)  # Always get features for the all-image box
   targets: List[ExtractionTarget] = []
 
-  if args.image_source.startswith("opensce"):
+  if args.image_source in {"hico", "hico-dbg"}:
+    from exp.ours.data.hico import HicoDataset
+    images = []
+    for split in (["val", "train", "test"] if args.image_source == "hico" else ["val"]):
+      for ex in HicoDataset(split).load():
+        qboxes = (
+            py_utils.flatten_list(h.object_bboxes for h in ex.hois) +
+            py_utils.flatten_list(h.human_bboxes for h in ex.hois) +
+            [[0, 0, ex.image_size[1], ex.image_size[0]]]
+        )
+        query_boxes = np.stack(qboxes, 0)
+        query_boxes = torchvision.ops.box_convert(torch.as_tensor(query_boxes), "xyxy", "xywh")
+        images.append((ex.image_id, query_boxes))
+    assert len(set(x[0] for x in images)) == len(images)
+    for image_id, qboxes in images:
+      targets.append(ExtractionTarget(image_id, query_boxes=qboxes.float().numpy()))
+
+  elif args.image_source == "web":
+    queries = defaultdict(set)
+    for split in ["train", "test", "val"]:
+      for ex in WebQaDataset(split).load():
+        queries[(ex.image_id, None)].add(default_query_box)
+    for (image_id, crop), parts in queries.items():
+      parts = [x for x in parts if x is not None]
+      qboxes = np.array(parts, dtype=np.float32) if parts else None
+      targets.append(ExtractionTarget(image_id, None, crop, qboxes))
+    logging.info(f"Running on {len(targets)} images")
+
+  elif args.image_source.startswith("opensce"):
     logging.info("Running on OpenSCE")
     if args.image_source == "opensce":
       tasks = GPV2_TASKS
@@ -233,6 +262,24 @@ def main():
       qboxes = np.array(parts, dtype=np.float32) if parts else None
       targets.append(ExtractionTarget(image_id, None, crop, qboxes))
     logging.info(f"Running on {len(targets)} images")
+
+  elif args.image_source == "coco-sce-nocic":
+    logging.info(f"Running on {args.image_source}")
+    queries = defaultdict(set)
+    for task in GPV2_TASKS:
+      if task == Task.CLS_IN_CONTEXT:
+        continue
+      for part in ["train", "val", "test"]:
+        for ex in GpvDataset(task, part, True).load():
+          crop, qbox = None, default_query_box
+          if task == Task.CLS:
+            crop = tuple(ex.crop)
+          queries[(ex.image_id, crop)].add(qbox)
+    for (image_id, crop), parts in queries.items():
+      parts = [x for x in parts if x is not None]
+      qboxes = np.array(parts, dtype=np.float32) if parts else None
+      targets.append(ExtractionTarget(image_id, None, crop, qboxes))
+    logging.info(f"Running on {len(targets)} images")
   elif args.image_source.startswith("coco"):
     logging.info(f"Running on {args.image_source}")
     tasks = {
@@ -246,7 +293,7 @@ def main():
       for part in parts:
         for ex in GpvDataset(task, part, False).load():
           crop, qbox = None, default_query_box
-          if task == Task.CLS_IN_CONTEXT:
+          if task == Task.CLS_IN_CONTEXT and not args.no_query:
             qbox = tuple(ex.query_box)
           elif task == Task.CLS:
             crop = tuple(ex.crop)
@@ -257,13 +304,15 @@ def main():
       targets.append(ExtractionTarget(image_id, None, crop, qboxes))
     logging.info(f"Running on {len(targets)} images")
   else:
+    default_query_arr = np.array([default_query_box])
+    assert default_query_arr.shape == (1, 4)
     for dirpath, dirnames, filenames in os.walk(args.image_source):
       for filename in filenames:
         filename = join(dirpath, filename)
         image_id = relpath(filename, args.image_source)
         assert ".." not in image_id  # Sanity check the relpath
         image_id = args.your_dataset_name + "/" + image_id
-        targets.append(ExtractionTarget(image_id, filename, None, default_query_box))
+        targets.append(ExtractionTarget(image_id, filename, None, default_query_arr))
 
     logging.info(f"Running on {len(targets)} images")
     logging.info(f"Example image_ids:")
