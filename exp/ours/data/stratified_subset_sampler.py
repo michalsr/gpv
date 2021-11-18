@@ -4,9 +4,10 @@ import torch
 from torch.utils.data import Dataset as TorchDataset, Sampler
 
 import numpy as np
-
+import os 
 from exp.ours.util import py_utils
 from exp.ours.util.our_utils import get_batch_bounds
+import utils.io as io 
 
 
 class StratifiedSubsetSampler(Sampler):
@@ -189,5 +190,11 @@ class ImageContrastSampler():
       #print(batch,'actual batch indicies')
       if batch.size()[0]<16:
         continue
-
+  
+      batch_entries = {}
+      for i,b in enumerate(batch):
+        ex = self.training_examples[b]
+        #print(ex.image_id,ex.index_of_class,ex.meta)
+          #batch_entries[i] = [ex.image_id,ex.index_of_class,ex.meta]
+        #io.dump_json_object(batch_entries,'exp/ours/batch_image_ids.json')
       yield batch 

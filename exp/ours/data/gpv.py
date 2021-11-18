@@ -38,7 +38,7 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
     raise NotImplementedError(kind)
   if ds == "web_80":
     split_txt = ""
-  split_txt = "held_out_test"
+  split_txt = "unseen"
   # elif unseen_split==True:
   #   split_txt = "held_out_all"
   # else:
@@ -196,6 +196,7 @@ GPV_KINDS = {
 
 
 def load_gpv_instances(kind, split, gpv_split,split_txt):
+
   return GPV_KINDS[kind](split, gpv_split,split_txt)
 
 
@@ -303,4 +304,5 @@ class GpvDataset(Dataset):
       np.random.RandomState(613423).shuffle(instances)
       return instances[:self.sample]
     else:
+      print(len(instances),'instances')
       return instances

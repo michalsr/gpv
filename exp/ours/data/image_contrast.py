@@ -77,7 +77,7 @@ def generate_id():
 
 def load_image_contrast(split):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
-  file = file_paths.IMAGECONTRAST_DIR+'/train_large.json'
+  file = file_paths.IMAGECONTRAST_DIR+'/train_web_large.json'
   
   logging.info(f"Loading webqa data from {file}")
   raw_instances = load_json_object(file)

@@ -316,13 +316,13 @@ class T5GPV(GPVModel):
 
   def _image_rel(self, encoder, image: ImageRegionFeatures):
     rel = self.image_relevance(encoder, image.objectness, image.boxes)
-    print(rel.size(),'old rel size')
-    print(rel,'rel old')
+    # print(rel.size(),'old rel size')
+    # print(rel,'rel old')
     if len(rel.size()) == 2:
       # TODO can we just use sigmoid?
       # convert sigmoid logits -> softmax logits
       rel = torch.stack([rel, torch.zeros_like(rel)], -1)
-      print(rel,'rel new')
+      #print(rel,'rel new')
     return rel
 
   def _rel_embedding(self, rel, encoder_outputs, image):
@@ -346,7 +346,7 @@ class T5GPV(GPVModel):
       )
 
   def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels) -> Tuple[torch.Tensor, Dict[str, float]]:
-    print('hello')
+    #print('hello')
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
     rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
     self._rel_embedding(rel, encoder_outputs, image_features)
@@ -448,7 +448,7 @@ class T5GPV(GPVModel):
     rel = self._image_rel(encoder_outputs.last_hidden_state, image_features)
     self._rel_embedding(rel, encoder_outputs, image_features)
     rel = rel.softmax(-1)[:, :, 0]
-    print(rel.size(),'relevance size')
+    #print(rel.size(),'relevance size')
     if self.beam_search_spec is not None:
       if self.mask is None:
         post_process = None

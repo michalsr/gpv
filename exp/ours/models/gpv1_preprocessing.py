@@ -156,6 +156,11 @@ class Gpv1Preprocessor(FromParams):
     if isinstance(example,ImageContrastExample):
       answer = self.preprocess_text(example.answer)
       final_answer = np.append(answer,int(example.answer))
+      # out = [GPVExample(
+      #   example.gpv_id, example.task, example.image_id,
+      #   query=[self.preprocess_text(example.query)],
+      #    target_answer=final_answer,meta=example.contrast_group,index_of_class=example
+      #  )]
       #print(example.contrast_group)
       #print(self.preprocess_text(example.answer).append('1'),'example answer')
       out = [GPVExample(
@@ -163,6 +168,7 @@ class Gpv1Preprocessor(FromParams):
         query=[self.preprocess_text(example.query)],
         target_answer=final_answer,meta=example.contrast_group,index_of_class=example.answer
       )]
+      
     elif isinstance(example, CaptioningExample):
       if is_train:
         out = []

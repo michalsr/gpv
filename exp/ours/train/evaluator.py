@@ -87,6 +87,7 @@ class PerExampleEvaluator(Evaluator):
       mean=True,
       subset_mapping=None
   ) -> Dict[ResultKey, Number]:
+    print(len(predictions),'predictions')
     examples_with_predictions = [x for x in examples if x.get_gpv_id() in predictions]
     if not allow_partial and (len(examples) != len(examples_with_predictions)):
       raise ValueError(f"Only {len(examples_with_predictions)}/{len(examples)} "
@@ -147,8 +148,11 @@ class ClsEvaluator(PerExampleEvaluator):
     out = []
     for example in examples:
       answer = predictions[example.gpv_id].text[0].lower()
+      #print(answer,'answer')
       gt_answer = SYNONYMS[example.category]
+      #print(gt_answer,'gt answer')
       out.append(dict(accuracy=answer in gt_answer))
+      #print(out,'out')
     return out
 
 
@@ -399,6 +403,7 @@ class LocalizationEvaluator(PerExampleEvaluator):
 
   def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput],
                         return_pr=False):
+    print(len(examples),'example length')
     eval_engine = det_evaluator.Evaluator()
     out = []
 

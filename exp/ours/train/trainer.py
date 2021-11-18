@@ -496,6 +496,8 @@ class Trainer(FromParams):
     collate_fn = CollateWithBatch(model.get_collate())
 
     to_eval = list(zip(eval_examples, self.eval_datasets))
+    print(eval_examples,'eval examples')
+    print(len(eval_examples),'to eval')
     #to_eval += list(zip(train_examples, self.train_datasets))
 
     # for t_e, t_d in zip(train_examples,self.train_datasets):
@@ -504,6 +506,7 @@ class Trainer(FromParams):
     #     to_eval += list(t_e,t_d)
 
     builder = self.eval_loader
+
     if builder is None:
       builder = self.train_loader
 
@@ -1113,16 +1116,20 @@ class Trainer(FromParams):
           loss = total_loss / n
           monitor = {k: v for k, v in monitor.items()}
         else:
-
+          print(batch['labels'].index_of_class,'labels in trainer')
           batch = our_utils.to_device(batch, device)
-          #print(batch,'second batch')
+         
+         
+
           loss, monitor = model(**batch)
+          print(loss,'loss')
           monitor = _remove_tensors(monitor)
+       
+          loss.backward()
+          loss = loss.item()
           # for group in optimizer.param_groups:
           #   for p in group['params']:
           #     print(p.grad)
-          loss.backward()
-          loss = loss.item()
 
         if self.clip_grad_norm is not None:
           torch.nn.utils.clip_grad_norm_(clip_params, self.clip_grad_norm)

@@ -183,6 +183,7 @@ def new_eval_on(task,model):
     epochs=1
   )
   eval_examples = [x.dataset.load() for x in eval_datasets]
+  print(len(eval_examples),'num eval examples')
   training_examples = [x.dataset.load() for x in train_datasets]
   eval_dir = 'outputs/coco_60_only_test'
   eval_runners = trainer._init_eval(model, training_examples, eval_examples)
@@ -193,7 +194,7 @@ def new_eval_on(task,model):
 
 def eval_on(args, run_dir, dataset, devices, skip_existing=False):
   #if args.output_dir:
-  output_dir = 'outputs/coco_60_only_test'
+  output_dir = 'image_contrast_normal_full_3'
 
  # elif args.output_name:
    # name = f"{dataset.get_name()}--{args.output_name}"
@@ -334,8 +335,8 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
     date=datetime.now().strftime("%m%d-%H%M%S"),
   )
 
-  with open(output_dir + "/config.json", "w") as f:
-    json.dump(config, f, indent=2)
+  # with open(output_dir + "/config.json", "w") as f:
+  #   json.dump(config, f, indent=2)
 
  
   if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
@@ -347,7 +348,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
 
   results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
 
- 
+  print(results,'results')
   results[ResultKey("n", None)] = len(output)
   logging.info(f"Caching evaluation to {output_dir}")
   cache_evaluation(output_dir, evaluator, results)
@@ -389,47 +390,49 @@ def main():
     raise ValueError("Cannot specify output_name and output_dir")
 
   models = our_utils.find_models(args.model)
-  if len(models) == 0:
-    logging.info("No models selected")
-    return
-
+  print(models)
+  # if len(models) == 0:
+  #   logging.info("No models selected")
+  #   return
+  run_dir = 'outputs/image_contrast_old_model'
   devices = our_utils.get_devices(args.device)
-  if args.output_dir:
-    models = py_utils.flatten_list(x[1] for x in models.values())
-    if len(models) > 1:
-      raise ValueError("Cannot use one output dir if more than one model selected!")
-    model = models[0]
+  # if args.output_dir:
+  #   models = py_utils.flatten_list(x[1] for x in models.values())
+  #   if len(models) > 1:
+  #     raise ValueError("Cannot use one output dir if more than one model selected!")
+  #model = models[0]
 
-    datasets = get_datasets_from_args(args, model)
-    print(dataset.split_txt)
-    dataset.change_split("gpv_split")
-    if len(datasets) > 1:
-      raise ValueError("Cannot use one output dir if more than one dataset is selected!")
-    if len(datasets) == 0:
-      raise ValueError("No datasets is selected!")
-    #eval_on(args, model, datasets[0], devices, skip_existing=False)
-    print('new eval')
-    new_eval_on(dataset,model)
-  else:
-    targets = []
-    for model_name, (model_dir, runs) in models.items():
-      for ds in get_datasets_from_args(args, model_dir):
-        ds.change_split("gpv_split")
-        for run_dir in runs:
-          targets.append((run_dir, ds))
+  datasets = get_datasets_from_args(args, 'outputs/image_contrast_old_model_2')
+  eval_on(args, 'outputs/image_contrast_old_model_2', datasets[0], devices, skip_existing=False)
+  #   print(dataset.split_txt)
+  #   dataset.change_split("gpv_split")
+  #   if len(datasets) > 1:
+  #     raise ValueError("Cannot use one output dir if more than one dataset is selected!")
+  #   if len(datasets) == 0:
+  #     raise ValueError("No datasets is selected!")
+  #   #eval_on(args, model, datasets[0], devices, skip_existing=False)
+  #   print('new eval')
+  #   new_eval_on(dataset,model)
+  # else:
+  #   targets = []
+  #   for model_name, (model_dir, runs) in models.items():
+  #     for ds in get_datasets_from_args(args, model_dir):
+  #       ds.change_split("gpv_split")
+  #       for run_dir in runs:
+  #         targets.append((run_dir, ds))
 
-    if len(targets) == 0:
-      raise ValueError("No datasets to evaluate on found!")
+  #   if len(targets) == 0:
+  #     raise ValueError("No datasets to evaluate on found!")
 
-    for i, (run_dir, dataset) in enumerate(targets):
+  #   for i, (run_dir, dataset) in enumerate(targets):
    
-      if len(targets) > 1:
-        logging.info(f"Evaluating on {run_dir} {dataset.get_name()} ({i+1}/{len(targets)})")
-      else:
-        logging.info(f"Evaluating on {run_dir} {dataset.get_name()}")
-      #print(args,run_dir,dataset,devices,args.actual_output_dir,len(targets))
-      print(ds)
-      new_eval_on(['gpv2'], load_model(run_dir,device=0))
+  #     if len(targets) > 1:
+  #       logging.info(f"Evaluating on {run_dir} {dataset.get_name()} ({i+1}/{len(targets)})")
+  #     else:
+  #       logging.info(f"Evaluating on {run_dir} {dataset.get_name()}")
+  #     #print(args,run_dir,dataset,devices,args.actual_output_dir,len(targets))
+  #     print(ds)
+  #new_eval_on(['det'], load_model(run_dir,device=0))
 
 
 if __name__ == '__main__':

@@ -62,8 +62,12 @@ class CollateWithTokenizer(Callable):
   def __call__(self, batch: List[GPVExample]):
     queries = []
     answers = []
-
+    indicies = []
     for ex in batch:
+      # print(ex.image_id,'image id')
+      # print(ex.index_of_class,'index of class')
+      #print(ex.target_answer,'target answer')
+      indicies.append(ex.index_of_class)
       q = ex.query[np.random.randint(0, len(ex.query))]
 
       if ex.target_answer is None or len(ex.target_answer) == 0:
@@ -112,9 +116,9 @@ class CollateWithTokenizer(Callable):
       [x.task for x in batch],
       answers["input_ids"],
       box_targets,
-      segmentation_labels=segmentation_labels,index_of_class=[x.index_of_class for x in batch]
+      segmentation_labels=segmentation_labels,index_of_class=indicies
     )
-
+    #print(labels.index_of_class,'index of class collate')
     out = dict(
       input_ids=queries["input_ids"],
       input_mask=queries["attention_mask"],

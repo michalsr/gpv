@@ -1,12 +1,16 @@
 import json 
 import utils.io as io
-UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
-             'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
-             'hot dog', 'keyboard', 'laptop', 'train', 'tv']
+# UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
+#              'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
+#              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
+# UNSEEN2 = ['banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
+#              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
 
+UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
+'sheep', 'suitcase', 'surfboard', 'wine glass']
 
 web_20_entries = []
-web_80 = io.load_json_object('/data/michal5/test_image_info.json')
+web_80 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/gpv_split/test.json')
 
 for entry in web_80:
 
@@ -23,7 +27,7 @@ for entry in web_80:
             web_20_entries.append(entry)
 print(len(web_20_entries))
 print(len(web_80))
-io.dump_json_object(web_20_entries,'/data/michal5/gpv/learning_phase_data/web_20/test_image_info.json')
+io.dump_json_object(web_20_entries,'/data/michal5/gpv/learning_phase_data/coco_detection/unseen_10/test.json')
 # print(len(web_20_entries))
 # io.dump_json_object(web_20_entries,'/data/michal5/gpv/learning_phase_data/web_20/test_image_info.json')
 # new_train_data = []
@@ -36,7 +40,7 @@ io.dump_json_object(web_20_entries,'/data/michal5/gpv/learning_phase_data/web_20
 #         new_entry['web_id'][p] = f"{p}_{i}"
 #     new_train_data.append(new_entry)
 # io.dump_json_object(new_train_data,'/data/michal5/gpv/learning_phase_data/web_20/test_image_info.json')
-old = io.load_json_object('/data/michal5/test_image_info.json')
-new = io.load_json_object('/data/michal5/gpv/learning_phase_data/web_20/test_image_info.json')
+old = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/gpv_split/test.json')
+new = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_10/test.json')
 print(len(old),'old')
 print(len(new),'new')

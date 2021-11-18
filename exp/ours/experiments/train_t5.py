@@ -63,22 +63,17 @@ def main():
   t5_dim = conf.d_model
 
   localization_loss = DetrLocalizationLoss(1, 5, 2, 1, 0.5, 1, 5, 2, ['labels'])
-
-  # Current best
-  model = T5GpvPerBox(
+  model = T5GPV(
     args.model,
     loss=BasicGPVLoss(localization_loss),
     image_feature_extractor=image_featurizer,
     image_joiner=Linear(image_dim, t5_dim),
     pre_tokenize=True,
-    query_box=None if args.query_box == "none" else args.query_box,
+    image_relevance=SumWithObjectness(t5_dim, objectness_factor=True),
+    query_box="always",
     all_lower_case=True,
     webqa_templates=TemplateWebQueryGenerator(use_commands=True),
-    initialize_from=args.init_from,
-    contrast_query="other",
-    convert_to_relevance="raw",
-    combine_with_objectness="multiply",
-    embed_objectness_score=False,
+    initialize_from=args.init_from
   )
 
   groups = [ParameterGroup(

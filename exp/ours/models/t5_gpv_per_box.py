@@ -528,6 +528,7 @@ class T5GpvPerBox(GPVModel):
     n_boxes = image_features.n_boxes
     #print(rel.size(),'relevance size')
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
+    #print(batch_pred.pred_rel[ixs],'batch pred')
     loss, monitor = self.loss(batch_pred, labels)
 
     if not self.cls_from_query_w:
