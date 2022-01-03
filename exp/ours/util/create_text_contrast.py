@@ -22,9 +22,9 @@ IMAGES_PER_COCO_CONCEPT = 1
 GROUP_SIZE = 16
 
 
-web_cat_to_image_id = io.load_json_object('/data/michal5/web_training_info/category_to_image_id.json')
+web_cat_to_image_id = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/category_to_image_id.json')
 all_web_concepts = list(web_cat_to_image_id.keys())
-coco_cat_to_web = io.load_json_object('/data/michal5/web_training_info/coco_cat_to_web_cat.json')
+coco_cat_to_web = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/coco_cat_to_web_cat.json')
 def get_concept_image(concept,num_images):
     options = web_cat_to_image_id[concept]
     chosen_images = np.random.choice(options,num_images)
@@ -33,9 +33,18 @@ def get_concept_image(concept,num_images):
 
 
 def find_non_concept_images(coco_concept,num_non_concept_images):
-    new_unseen = UNSEEN_COMBINED.copy()
-    new_unseen.remove(coco_concept)
-    other_concepts = np.random.choice(new_unseen,num_non_concept_images)
+    other_concept_image_ids = []
+    found_enough_concepts = False 
+    while not found_enough_concepts:
+        other_concepts = np.random.choice(all_web_concepts,num_non_concept_images-1)
+        is_coco_concept_in_other_concepts = []
+        for c in other_concepts.tolist():
+            if c in coco_cat_to_web[coco_concept]:
+                is_coco_concept_in_other_concepts.append(True)
+            else:
+                is_coco_concept_in_other_concepts.append(False)
+        if all(is_coco_concept_in_other_concepts)!= True:
+            found_enough_concepts=True
     print(f'Other concepts:{other_concepts}')
     # for c in other_concepts.tolist():
     #     image_id = get_concept_image(c,1)
@@ -70,7 +79,6 @@ def main():
     text_contrast_data = []
     #for i,coco_class in enumerate(SEEN):
     ids_used = set()
-    id_value = 0
     contrast_group = 0
     for i,coco_class in enumerate(UNSEEN_COMBINED):
         if coco_class != 'remote':
@@ -79,7 +87,7 @@ def main():
                 for web_img in tqdm(web_cat_to_image_id[web_c]):
                     #web_class_images = get_concept_image(web_class_to_search.tolist()[0],IMAGES_PER_COCO_CONCEPT)
                     #print(f'Web class images:{web_class_images}')
-                    other_concepts = find_non_concept_images(coco_class,GROUP_SIZE-1)
+                    other_concepts = find_non_concept_images(coco_class,GROUP_SIZE)
                     #print(f'Other image ids:{other_images}')
                     web_concept_position = get_random_position(GROUP_SIZE)
                     other_concepts.insert(web_concept_position.tolist()[0],coco_class)
@@ -87,13 +95,11 @@ def main():
                         entry = {}
                         entry['image'] = {'image_id':web_img}
                         entry['query'] = f'Localize the {concept_text}'
-                        #print(concept_text,'concept text')
-                        entry['rel_query'] = coco_class
                         entry['boxes'] = [0.0,0.0,1.0,1.0]
                         entry['contrast_group'] = contrast_group
+                        entry['rel_query'] = coco_class
                         entry['answer'] = str(web_concept_position.tolist()[0])
-                        entry['gpv_id'] = f"text-contrast-{str(web_c)}-{str(web_img)}-{str(concept_text)}-{str(id_value)}"
-                        id_value += 1
+                        entry['gpv_id'] = f"text-contrast-{str(coco_class)}-{str(web_c)}-{str(web_img)}-{str(concept_text)}"
                         if entry['gpv_id'] in ids_used:
                             break
                         ids_used.add(entry['gpv_id'])
@@ -103,10 +109,8 @@ def main():
                             entry['is_in_category'] = True
                         text_contrast_data.append(entry)
                     contrast_group += 1
-    print(contrast_group,'contrast_group')
-    print(len(text_contrast_data))
     io.dump_json_object(text_contrast_data,'/data/michal5/gpv/text_contrast/train_large.json')
-    io.dump_json_object(text_contrast_data,'/home/michal/gpv_michal/text_contrast_train_large.json')
+    #io.dump_json_object(text_contrast_data,'/shared/rsaas/michal5/gpv_michal/text_contrast_train_large.json')
 
 
 

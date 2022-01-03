@@ -32,6 +32,7 @@ class ImageContrastExample:
   query: str 
   contrast_group: str
   is_in_category: bool 
+  rel_query: str
 
 
 
@@ -77,8 +78,9 @@ def generate_id():
 
 def load_image_contrast(split):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
-  file = file_paths.IMAGECONTRAST_DIR+'/train_web_large.json'
-  
+  #file = file_paths.IMAGECONTRAST_DIR+'/train_large_2.json'
+  #file = '/data/michal5/gpv/text_contrast/train_large.json'
+  file = '/data/michal5/gpv/image_contrast/train_large_update.json'
   logging.info(f"Loading webqa data from {file}")
   raw_instances = load_json_object(file)
   out = []
@@ -91,7 +93,7 @@ def load_image_contrast(split):
       image_id = x["image"]
 
     ex = ImageContrastExample(gpv_id=x['gpv_id'],image_id=image_id,answer=x['answer'],
-    query=x['query'],contrast_group=x['contrast_group'],is_in_category=x['is_in_category']
+    query=x['query'],contrast_group=x['contrast_group'],is_in_category=x['is_in_category'],rel_query=x['rel_query']
       )
     out.append(ex)
     

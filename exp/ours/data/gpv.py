@@ -39,6 +39,7 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
   if ds == "web_80":
     split_txt = ""
   split_txt = "unseen"
+  #split_txt = "gpv_split"
   # elif unseen_split==True:
   #   split_txt = "held_out_all"
   # else:

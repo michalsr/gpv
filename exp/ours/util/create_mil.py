@@ -16,7 +16,10 @@ def get_concept_image(concept,num_images):
     chosen_images = np.random.choice(options,num_images)
     return chosen_images.tolist()
 
-
+def get_another_concept(given_concept):
+    new_concept_list = UNSEEN_COMBINED.copy()
+    new_concept_list.remove(given_concept)
+    return np.random.choice(new_concept_list,1)
 
 def find_non_concept_images(coco_concept,num_non_concept_images):
     other_concept_image_ids = []
@@ -76,16 +79,29 @@ def main():
                 for web_img in tqdm(web_cat_to_image_id[web_c]):
                     for correct in [0,1]:
                         entry = {}
+                        #print(correct,'correct')
+                        if correct == 0:
+                            print('hi')
+                            new_concept = get_another_concept(coco_class).tolist()[0]
+                            print(new_concept,'new concep')
+                            entry['rel_query'] = new_concept 
+                            entry['query'] = f'Localize the {new_concept}'
+                        else:
+                            print('second hi')
+                            entry['rel_query'] = coco_class 
+                            entry['query'] = f'Localize the {coco_class}'
+                       
                         entry['image'] = {'image_id':web_img}
-                        entry['query'] = f'Localize the {coco_class}'
+                        #entry['query'] = f'Localize the {coco_class}'
                         entry['boxes'] = [0.0,0.0,1.0,1.0]
-                        entry['rel_query'] = coco_class 
+                        #entry['rel_query'] = coco_class 
                         entry['answer'] = correct 
                         entry['correct'] = correct 
                         entry['gpv_id'] = f"mil-{str(coco_class)}-{str(web_c)}-{str(web_img)}-{str(id_begin)}"
                         id_begin += 1
-                    mil_data.append(entry)
-    io.dump_json_object(mil_data,'/data/michal5/mil/train_large.json')
+                        mil_data.append(entry)
+    io.dump_json_object(mil_data,'/data/michal5/gpv/mil/train_large.json')
+    io.dump_json_object(mil_data,'/shared/rsaas/michal5/gpv_michal/mil/train_large.json')
     
 
 

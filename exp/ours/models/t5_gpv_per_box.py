@@ -35,14 +35,17 @@ class CollateLocalizationLabels:
 
   def collate(self, batch: List[GPVExample], out):
     # Get the tokenized labels for each detection example
+    
     per_box_labels = []
     for ex in batch:
-      if ex.task == Task.DETECTION:
+      #print(ex.task==Task.IMAGECONTRAST,'task')
+      if ex.task == Task.DETECTION or ex.task == Task.IMAGECONTRAST or ex.task == Task.MIL:
         assert ex.relevance_query is not None
+        #print('examples')
         per_box_labels.append(ex.relevance_query)
       else:
         per_box_labels.append(self.tokenizer.pad_token)
-
+    print(per_box_labels,'per box labels')
     labels = self.tokenizer(
       per_box_labels, return_tensors='pt', padding=True, truncation=True)
     return dict(relevance_queries=labels["input_ids"].view(len(batch), -1))
@@ -201,6 +204,9 @@ class T5GpvPerBox(GPVModel):
         state_dict["image_joiner.weight"] = F.pad(state_dict["image_joiner.weight"], [0, 5, 0, 0],)
       missing_key, unexpected_key = self.load_state_dict(state_dict, strict=False)
       logging.info(f"Missing keys {missing_key}")
+      # self.relevance_rescale.bias.data[:] = 0
+      # self.relevance_rescale.weight.data[:] = 0
+      # self.relevance_rescale.weight.data[0, 0] = 1.0
       return
 
     if self.initialize_t5:
@@ -379,6 +385,7 @@ class T5GpvPerBox(GPVModel):
 
   def _image_rel(self, image_features: ImageRegionFeatures, box_rel, contextual_embeds):
     """Converts box-scores and image_features to relevance scores"""
+    #print(len(box_rel.size()),'box rel size')
     if self.convert_to_relevance == "raw":
       box_scores = self.relevance_rescale(box_rel)
 
@@ -392,6 +399,7 @@ class T5GpvPerBox(GPVModel):
 
       # Re-calibrate now [batch, n_boxes, 2] logits
       box_scores = self.relevance_rescale(box_rel)
+      #print(box_scores,'box scores')
     else:
       raise NotImplementedError(self.convert_to_relevance)
 
@@ -408,7 +416,7 @@ class T5GpvPerBox(GPVModel):
       box_scores = objectness*factor + box_scores
     else:
       raise ValueError()
-
+    #print(box_scores,'box scores')
     return box_scores
 
   def compute_per_box_score(
@@ -438,7 +446,7 @@ class T5GpvPerBox(GPVModel):
     per_box_outputs_lst = []
     ixs = []
     for i, task in enumerate(tasks):
-      if not (task == Task.DETECTION):
+      if not (task == Task.DETECTION or task == Task.IMAGECONTRAST or task == Task.MIL):
         continue
       ixs.append(i)
       if self.box_context == "none" or self.box_context is None:
@@ -476,8 +484,10 @@ class T5GpvPerBox(GPVModel):
         -10000,
         device=device, dtype=torch.float
       )
+      #print(batched_rel_scores.size(),'batched rel scores')
 
     if len(ixs) == 0:
+      #print('hi')
       return batched_rel_scores
 
     per_box_inputs, per_box_mask = our_utils.stack_and_pad_blocks(per_box_inputs_lst)
@@ -494,8 +504,9 @@ class T5GpvPerBox(GPVModel):
     dim = t5_out.logits.size(-1)
     per_label_score = F.cross_entropy(
       t5_out.logits.view(-1, dim), per_box_outputs.view(-1), reduction="none")
+    
     per_label_score = -per_label_score.view(total_boxes, -1).sum(1)
-
+    #print(per_label_score,'per label score')
     if self.contrast_query is not None:
       c_labels = self.contrast_query_tok.unsqueeze(0).repeat(total_boxes, 1)
       contrast_query_out = self.model(
@@ -504,10 +515,12 @@ class T5GpvPerBox(GPVModel):
         labels=c_labels,
         return_dict=True,
       )
+
       c_per_label_score = F.cross_entropy(
         contrast_query_out.logits.view(-1, dim), c_labels.view(-1), reduction="none")
       c_per_label_score = -c_per_label_score.view(total_boxes, -1).sum(1)
       per_label_score = torch.stack([per_label_score, c_per_label_score], -1)
+      #print(per_label_score.size(),'per label score')
 
     on = 0
     for i in ixs:
@@ -515,24 +528,30 @@ class T5GpvPerBox(GPVModel):
       batched_rel_scores[i, :n] = per_label_score[on:on+n]
       on = on + n
     assert on == len(per_label_score)
+    #print(batched_rel_scores.size(),'final batched rel scores ')
     return batched_rel_scores
 
   def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
               relevance_queries) -> Tuple[torch.Tensor, Dict[str, float]]:
+
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
     #print(len(input_ids),'input ids')
+    # per_box_scores = self.compute_per_box_score(
+    #   labels.tasks, encoder_outputs.last_hidden_state,
+    #   image_features.get_n_boxes(), relevance_queries, input_mask, True)
     per_box_scores = self.compute_per_box_score(
       labels.tasks, encoder_outputs.last_hidden_state,
       image_features.get_n_boxes(), relevance_queries, input_mask, True)
     #print(per_box_scores.size(),'per box scores size')
     rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
-
+    #print(rel.size(),'relevance scores')
     t5_out = self.model(
       encoder_outputs=encoder_outputs,
       attention_mask=input_mask,
       labels=labels.text_labels,
       return_dict=True,
     )
+    #print(labels.text_labels,'text labels')
 
     if not self.predict_trailing_pad_tokens:
       # -100 marks a label as not a target
@@ -543,7 +562,8 @@ class T5GpvPerBox(GPVModel):
     n_boxes = image_features.n_boxes
     #print(rel.size(),'relevance size')
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
-    #print(batch_pred.pred_rel[ixs],'batch pred')
+    #print(rel,'batch pred')
+    #print(batch_pred,'batch pred')
     loss, monitor = self.loss(batch_pred, labels)
 
     return loss, monitor
@@ -623,13 +643,18 @@ class T5GpvPerBox(GPVModel):
     task = labels.tasks[0]
     if not all(x == task for x in labels.tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
-
+    #print(task,'TASK')
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
-    if task == Task.DETECTION:
+    if task == Task.DETECTION or task == Task.IMAGECONTRAST:
+      #print('hi using this')
       per_box_scores = self.compute_per_box_score(
         labels.tasks, encoder_outputs.last_hidden_state,
         image_features.get_n_boxes(), relevance_queries, input_mask, True)
+      #print(per_box_scores,'per box scores for prediction')
+      #print(per_box_scores.size(),'per box scores size for prediction')
       rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
+      #print(rel.size(),'final image rel for prediction')
+      #print(rel,'rel')
       rel = rel.softmax(-1)[:, :, 0]
     else:
       if len(image_features.objectness.size()) == 3:
@@ -697,7 +722,7 @@ class T5GpvPerBox(GPVModel):
         to_subtract = torch.full_like(rel[i], 10000)
         to_subtract[keep] = 0
         rel[i] -= to_subtract
-
+    #print(rel.size(),'rel last line')
     return build_per_example_output(
       out_text, logprobs, image_features.boxes, rel, image_features.n_boxes)
 
