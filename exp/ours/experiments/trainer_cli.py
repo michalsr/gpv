@@ -77,7 +77,7 @@ def get_trainer_from_args(
       tasks.update({x: None for x in [Task.VQA, Task.CAPTIONING, Task.DETECTION]})
     elif dataset == 'webqa':
       continue
-    elif dataset == 'img-contrast':
+    elif dataset == 'img-contrast' or dataset == 'mil':
       continue
     else:
       tasks[Task(dataset)] = None
@@ -139,14 +139,14 @@ def get_trainer_from_args(
         x.eval_sample = 8000
    
     for x in eval_datasets:
-      print(x.dataset.get_task())
+      #print(x.dataset.get_task())
       if x.dataset.get_task() == Task.CAPTIONING:
         x.eval_sample = 8000
       elif x.dataset.get_task() == Task.WEBQA:
         x.eval_sample = 1314
       else:
-        x.eval_sample = 4857
-      x.eval_sample=4857
+        x.eval_sample = 39426
+      x.eval_sample=39426
 
   evaluation = {
     Task.VQA: EvaluationSetup(

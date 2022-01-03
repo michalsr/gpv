@@ -496,8 +496,8 @@ class Trainer(FromParams):
     collate_fn = CollateWithBatch(model.get_collate())
 
     to_eval = list(zip(eval_examples, self.eval_datasets))
-    print(eval_examples,'eval examples')
-    print(len(eval_examples),'to eval')
+    #print(eval_examples,'eval examples')
+    #print(len(eval_examples),'to eval')
     #to_eval += list(zip(train_examples, self.train_datasets))
 
     # for t_e, t_d in zip(train_examples,self.train_datasets):
@@ -612,10 +612,14 @@ class Trainer(FromParams):
       else:
         world_size, rank = None, None
 
-      # samples = [x.train_sample for x in self.train_datasets]
+      samples = [x.train_sample for x in self.train_datasets]
       # sampler = StratifiedSubsetSampler(
       #   all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
-      sampler = ImageContrastSampler(all_train)
+      if all_train[0].correct_answer != None:
+        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(all_train),batch_size=16,drop_last=True)
+      else:
+        sampler = ImageContrastSampler(all_train)
+      
       shuffle = False   # Sampler does shuffling
       loader_batch_size = 1  # Sampler does batching
     else:
@@ -860,6 +864,8 @@ class Trainer(FromParams):
     total_eval = 0
     all_eval = (list(zip(eval_examples, self.eval_datasets))) 
     #+list(zip(training_examples, self.train_datasets)))
+    # all_eval = (list(zip(eval_examples, self.eval_datasets)) +
+    #             list(zip(training_examples, self.train_datasets)))
     for (examples, ds) in all_eval:
       if ds.eval_sample:
         total_eval += ds.eval_sample
@@ -1116,7 +1122,7 @@ class Trainer(FromParams):
           loss = total_loss / n
           monitor = {k: v for k, v in monitor.items()}
         else:
-          print(batch['labels'].index_of_class,'labels in trainer')
+          #print(batch['labels'].index_of_class,'labels in trainer')
           batch = our_utils.to_device(batch, device)
          
          

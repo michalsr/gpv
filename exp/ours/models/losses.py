@@ -24,6 +24,7 @@ class GpvBatchLabels:
   tasks: List[Task]
   text_labels: torch.Tensor
   box_targets: List
+  mil_labels: List
   segmentation_labels: List
   index_of_class: str
 
@@ -233,73 +234,31 @@ class BasicGPVLoss(GPVLoss):
         min_val = p[0]
     return min_val 
   def contrastive_loss(self,logits,batch_labels):
-    
-    # print(logits,'logits')
-    # print(logits.size(),'logits size')
-    # print(batch_labels.index_of_class,'index of class')
-    # for i,pred in enumerate(logits):
-    #   max_val = self.check_max_values(pred)
-     
-    #   max_logit = torch.max(pred)
-    #   top_1_logits[i] = max_val
-    # top_1_logits = torch.max()
-    #logits[:,:,0] = -100
-    #print(batch_labels.index_of_class,'index of class')
-    print(logits,'logits')
-    new_logits = logits[:,:,0]
-    #print('new logits',new_logits)
-    if not os.path.exists('exp/ours/logits.json'):
-      io.dump_json_object(logits.cpu().detach().numpy(),'exp/ours/logits.json')
-    if not os.path.exists('exp/ours/new_logits.json'):
-      io.dump_json_object(new_logits.cpu().detach().numpy(),'exp/ours/new_logits.json')
-    print(new_logits,'new logits')
-    #new_logits += 1e-10 
-    top_1_logits,_  = torch.max(new_logits,dim=(1))
-    print('top logits',top_1_logits)
-    if not os.path.exists('exp/ours/top_1_logits.json'):
-      io.dump_json_object(top_1_logits.cpu().detach().numpy(),'exp/ours/top_1_logits.json')
-    #print(top_1_logits)
-    final_logits = torch.cuda.FloatTensor(top_1_logits).to("cuda:0")
-
-    #print(batch_labels,'batch labels'
+    final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
     target_index = int(batch_labels.index_of_class[0])
-    #print('target index',target_index)
     if not os.path.exists('exp/ours/target_index.json'):
       io.dump_json_object(target_index,'exp/ours/target_index.json')
-    #print(target_index,'target index')
-    # target_index = batch_labels[0][-2]
-    # if target_index>16:
-    #   target_idex = batch_labels[0][2]
-    # print(target_index,batch_labels,'target index')
-    losses =torch.zeros(16)
-  
-    #exps = torch.exp(final_logits - torch.max(final_logits))
-    probs = final_logits.softmax(dim=0)
-    print(torch.argmax(probs),'prob max')
-    # return -torch.log(probs[target_index])
-    # print(probs,'probs')
-    # for i in range(16):
-    #   if i != target_index:
-    #     losses[i] = -torch.log(1-probs[i])
-    #   else:
-    #     print('target_index',i)
-    #     print(-torch.log(probs[i]))
-    #     losses[i] = -torch.log(probs[i])
-
-    #print(losses,'losses')
-        #losses[i] = F.cross_entropy(torch.unsqueeze(final_logits,0).cuda(),index_t.long()).cuda()
+    #losses =torch.zeros(16)
     targets = torch.zeros(16)
     targets[target_index] = 1
     targets.to("cuda:0")
-    print(final_logits,'final logits')
-    print(targets,'targets')
-    # # #t_index = torch.cuda.FloatTensor([float(target_index)]).to("cuda:0")
-    # # # print(t_index,'t index')
-    # # # print(final_logits.size(),'final logits')
-
-    # # #loss = F.cross_entropy(torch.unsqueeze(final_logits,0).cuda(),t_index.long()).cuda()
     loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),targets.cuda()).cuda()
+    #loss = F.nll_loss(filtered_logits.cuda(),targets.type(torch.LongTensor).cuda()).cuda()
     return loss
+  def mil(self,logits,batch_labels):
+      print(logits,'logits')
+      print(logits.size())
+      print(batch_labels,'batch labels')
+      print(logits[:,:,0].size())
+      print(logits[:,:,0].sort(),'sort')
+      max_logits,idx = torch.max(logits[:,:,0],dim=(1))
+      print(idx,'idx')
+      final_logits = torch.cuda.FloatTensor(max_logits).to("cuda:0")
+      #final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
+      print(final_logits,'logits')
+      loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),torch.FloatTensor(batch_labels).cuda()).cuda()
+      print(loss,'loss')
+      return loss 
   def forward(self, prediction: GpvBatchPrediction, batch_labels: GpvBatchLabels):
     task_to_ix = collections.defaultdict(list)
     for i, task in enumerate(batch_labels.tasks):
@@ -318,12 +277,16 @@ class BasicGPVLoss(GPVLoss):
           [batch_labels.box_targets[i] for i in ix_lst])
         losses.update(log)
         task_loss = total
+      elif task == Task.MIL:
+        loss = self.mil(prediction.pred_rel[ixs],batch_labels.mil_labels)
+        losses[str(task) + "-loss"] = loss
+        task_loss = loss
       elif task == Task.IMAGECONTRAST:
-        print(prediction.pred_rel[ixs],'relative predition')
+        #print(prediction.pred_rel[ixs],'relative predition')
         loss = self.contrastive_loss(prediction.pred_rel[ixs],batch_labels)
         losses[str(task) + "-loss"] = loss
         task_loss = loss
-        print(task_loss,'task loss')
+        #print(task_loss,'task loss')
         # total, log = self.localization(
         #   prediction.pred_boxes[ixs], prediction.pred_rel[ixs],
         #   None if n_boxes is None else n_boxes[ixs],

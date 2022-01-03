@@ -301,7 +301,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
 
   if output_dir is not None:
     logging.info(f"Saving output to {output_dir}")
-    save_gpv_output(output, output_dir)
+    #save_gpv_output(output, output_dir)
 
     config = dict(
       batch_size=batch_size,
@@ -312,8 +312,8 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
       date=datetime.now().strftime("%m%d-%H%M%S"),
     )
 
-    with open(output_dir + "/config.json", "w") as f:
-      json.dump(config, f, indent=2)
+    # with open(output_dir + "/config.json", "w") as f:
+    #   json.dump(config, f, indent=2)
 
   if args.eval:
     if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
@@ -389,7 +389,7 @@ def main():
   if args.output_dir and args.output_name:
     raise ValueError("Cannot specify output_name and output_dir")
 
-  models = our_utils.find_models(args.model)
+  models = our_utils.find_models('outputs/mil_fix')
   print(models)
   # if len(models) == 0:
   #   logging.info("No models selected")
@@ -402,8 +402,8 @@ def main():
   #     raise ValueError("Cannot use one output dir if more than one model selected!")
   #model = models[0]
 
-  datasets = get_datasets_from_args(args, 'outputs/image_contrast_old_model_2')
-  eval_on(args, 'outputs/image_contrast_old_model_2', datasets[0], devices, skip_existing=False)
+  datasets = get_datasets_from_args(args, 'outputs/mil_fix')
+  eval_on(args, 'outputs/mil_fix', datasets[0], devices, skip_existing=False)
   #   print(dataset.split_txt)
   #   dataset.change_split("gpv_split")
   #   if len(datasets) > 1:

@@ -63,10 +63,13 @@ class CollateWithTokenizer(Callable):
     queries = []
     answers = []
     indicies = []
+    mil_answers = []
     for ex in batch:
       # print(ex.image_id,'image id')
       # print(ex.index_of_class,'index of class')
       #print(ex.target_answer,'target answer')
+      if ex.correct_answer!= None:
+        mil_answers.append(ex.correct_answer)
       indicies.append(ex.index_of_class)
       q = ex.query[np.random.randint(0, len(ex.query))]
 
@@ -116,7 +119,7 @@ class CollateWithTokenizer(Callable):
       [x.task for x in batch],
       answers["input_ids"],
       box_targets,
-      segmentation_labels=segmentation_labels,index_of_class=indicies
+      segmentation_labels=segmentation_labels,index_of_class=indicies,mil_labels=mil_answers
     )
     #print(labels.index_of_class,'index of class collate')
     out = dict(

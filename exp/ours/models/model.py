@@ -93,7 +93,7 @@ class GPVModel(nn.Module, Registrable):
 
 def build_per_example_output(text, text_scores, boxes, rel, n_boxes=None, box_format="cxcywh") -> List[GPVExampleOutput]:
   out = []
-  print(text,'text')
+  #print(text,'text')
   if text_scores is not None:
     if isinstance(text_scores, torch.Tensor):
       text_scores = text_scores.cpu().numpy()
