@@ -7,9 +7,9 @@ UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse',
              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
 
 
-web_cat_to_image_id = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/category_to_image_id.json')
+web_cat_to_image_id = io.load_json_object('/data/michal5/web_training_info/category_to_image_id.json')
 all_web_concepts = list(web_cat_to_image_id.keys())
-coco_cat_to_web = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/coco_cat_to_web_cat.json')
+coco_cat_to_web = io.load_json_object('/data/michal5/web_training_info/coco_cat_to_web_cat.json')
 print(coco_cat_to_web.keys())
 def get_concept_image(concept,num_images):
     options = web_cat_to_image_id[concept]
@@ -48,7 +48,7 @@ def make_coco_cat_to_web_cat():
     for coco_class in UNSEEN_COMBINED:
     #or coco_class in UNSEEN_COMBINED:
         coco_dict[coco_class] = set()
-    web_train_info = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/train_image_info.json')
+    web_train_info = io.load_json_object('/data/michal5/web_training_info/train_image_info.json')
     for entry in web_train_info:
         coco_categories = entry['coco_categories']
         if len(entry['coco_categories']['seen']) != 0:
@@ -63,7 +63,7 @@ def make_coco_cat_to_web_cat():
                     coco_dict[c].add(entry['bing_query'])
     for f in coco_dict:
         final_coco_dict[f] = list(coco_dict[f])
-    io.dump_json_object(final_coco_dict,'/shared/rsaas/michal5/gpv_michal/web_training_info/'+'coco_cat_to_web_cat_seen_2.json')
+    io.dump_json_object(final_coco_dict,'/data/michal5/web_training_info/'+'coco_cat_to_web_cat_seen_2.json')
 def main():
     mil_data = []
     id_begin = 0
