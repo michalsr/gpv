@@ -80,7 +80,7 @@ def load_image_contrast(split):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
   #file = file_paths.IMAGECONTRAST_DIR+'/train_large_2.json'
   #file = '/data/michal5/gpv/text_contrast/train_large.json'
-  file = '/data/michal5/gpv/image_contrast/train_large_update.json'
+  file = '/data/michal5/gpv/lessons/image_contrast_train.json'
   logging.info(f"Loading webqa data from {file}")
   raw_instances = load_json_object(file)
   out = []

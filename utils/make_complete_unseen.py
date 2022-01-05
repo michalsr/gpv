@@ -61,7 +61,7 @@ def main():
 
     sub_folders = ['coco_classification','coco_detection','vqa','coco_captions']
     #sub_folders = ['coco_classification']
-    training_type = ['test']
+    training_type = ['train','val','test']
 
     for folder in sub_folders:
      
@@ -72,7 +72,7 @@ def main():
          
             for entry in gpv_split:
                 if 'category_id' in entry:
-                    if int(entry['category_id']) in unseen_categories.keys() and int(entry['id']) not in ids_used:
+                    if int(entry['category_id']) not in unseen_categories.keys() and int(entry['id']) not in ids_used:
                         new_split.append(entry)
                         ids_used.add(int(entry['id']))
 
@@ -90,7 +90,7 @@ def main():
                         for c in entry['coco_categories']['unseen']:
                             coco_classes.append(c)
                     if len(coco_classes) != 0:
-                        if  all(c in unseen_categories.values() for c in coco_classes) and int(entry_id) not in ids_used:
+                        if not  all(c in unseen_categories.values() for c in coco_classes) and int(entry_id) not in ids_used:
                             new_split.append(entry)
                             ids_used.add(int(entry_id))
 
@@ -98,7 +98,9 @@ def main():
                 if folder == 'coco_classification':
                     if entry['image']['image_id'] not in image_ids[data_type]['image_ids']:
                         image_ids[data_type]['image_ids'].append(entry['image']['image_id'])
-            save_entry('/data/michal5/gpv/learning_phase_data/'+folder+'/held_out_test',new_split,data_type)
+            save_entry('/data/michal5/gpv/learning_phase_data/'+folder+'/seen_60',new_split,data_type)
+            save_entry('/shared/rsaas/michal5/seen_60/'+folder+'/seen_60',new_split,data_type)
+            print(len(new_split))
         # if folder == 'coco_classification':
         #     save_entry('/data/michal5/gpv/learning_phase_data/split_coco_images/held_out_all',image_ids['train'],'train')
         #     save_entry('/data/michal5/gpv/learning_phase_data/split_coco_images/held_out_all',image_ids['val'],'val')
@@ -106,4 +108,4 @@ def main():
             
 
 if __name__ == '__main__':
-  make_20()
+  main()

@@ -75,6 +75,8 @@ def get_trainer_from_args(
       tasks.update({x: None for x in GPV2_TASKS})
     elif dataset == "non-cls":
       tasks.update({x: None for x in [Task.VQA, Task.CAPTIONING, Task.DETECTION]})
+    elif dataset == 'lesson':
+      continue 
     elif dataset == 'webqa':
       continue
     elif dataset == 'img-contrast' or dataset == 'mil':

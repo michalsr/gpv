@@ -341,6 +341,9 @@ class Trainer(FromParams):
   clip_grad_norm_re: Optional[str] = None
   clip_grad_norm: Optional[float] = None
 
+  #When to move onto next lesson 
+  num_no_change_val: Optional[float] = None
+  upper_bound_no_change: Optional[float] = None  
   # Data iterator parameters
   find_unused_parameters: bool = True
   end_at_epoch: Optional[int] = None
@@ -1228,6 +1231,9 @@ class Trainer(FromParams):
           if run_dir:
             best_model_file = join(run_dir, file_paths.BEST_STATE_NAME)
             torch.save(_base_model.state_dict(), best_model_file)
+      if not self.best_model_key:
+        self.num_no_change_val + 1
+    
 
       if (run_dir is not None and
           self.save_each_epoch and
@@ -1253,4 +1259,8 @@ class Trainer(FromParams):
 
       if epoch == self.end_at_epoch:
         logging.info(f"Hit epoch {self.end_at_epoch}, ending early")
+        break
+      if self.num_no_change_val >= self.upper_bound_no_change:
+        logging.info(f"Validation score has decreased or not changed for too many epochs. Ending training")
+        logging.info(f"Best score is {best_saved_score}")
         break
