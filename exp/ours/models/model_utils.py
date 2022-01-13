@@ -4,6 +4,8 @@ from typing import List, Dict, Tuple, Any, Set
 from collections import Callable, defaultdict
 
 from dataclasses import dataclass
+
+from torch.jit import Error
 from transformers import PreTrainedTokenizer, T5Tokenizer
 
 from exp.ours.data.gpv_example import GPVExample
@@ -12,7 +14,7 @@ from exp.ours.image_featurizer.image_featurizer import ImageCollater
 from exp.ours.models.losses import GpvBatchLabels
 from exp.ours.train.optimizer_builder import ParameterSet
 import numpy as np
-
+from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.util.nlp_utils import prepare_batch_from_pre_encoded
 
 
@@ -59,20 +61,78 @@ class CollateWithTokenizer(Callable):
   pre_tokenized: bool
   other_collate: Any = None
 
-  def __call__(self, batch: List[GPVExample]):
+  def __call__(self, batch):
     queries = []
     answers = []
     indicies = []
     mil_answers = []
+    print('hello')
+    #print(type(batch[0]),'batch type')
+    if type(batch[0]) == list:
+
+      #print(batch[0],'batc 0')
+    
+      #print(batch[0],'batch')
+      new_batch = py_utils.flatten_list(batch)
+
+      # if batch[0][0].task == (Task.IMAGECONTRAST or Task.TEXTCONTRAST or Task.SYNONYM):
+      #   new_batch = [item for sublist in batch for item in sublist]
+   
+      # if batch[0][0].task == Task.SYNONYM:
+      
+      #   for i in range(len(batch)):
+      #     new_batch.append(batch[i][0])
+      #     new_batch.append(batch[i][1])
+      #     print(new_batch[-1].image_id,'1')
+      #     print(new_batch[-2].image_id,'2')
+      batch = new_batch
+     
+      if batch[0].task == Task.IMAGECONTRAST or batch[0].task == Task.TEXTCONTRAST:
+        idx = batch[0].index_of_class
+        idxes = [int(x.index_of_class) for x in batch]
+        for y in batch:
+          if int(y.index_of_class) != int(idx):
+            print(idxes,'idxes')
+            raise ValueError
+        print('Images check out')
+      if batch[0].task == (Task.SYNONYM):
+        #image id should be the same for every pair 
+        for i in range(0,len(batch),2):
+          if str(batch[i].image_id) != str(batch[i+1].image_id):
+            print(batch[i].image_id,batch[i+1].image_id)
+            raise ValueError 
+        # print(int(idx)==int(batch[1].index_of_class))
+        # if not all(idxes) == int(idx):
+        #   print(idxes)
+        #   raise Error
+     
+      # for i,b in enumerate(new_batch):
+      #   print(i,b.index_of_class,'index of class')
+    # for i,ex in enumerate(batch):
+    #   if i!= len(batch)-2:
+    #     print(batch[i].image_id,batch[i+1].image_id)
+    #     if str(batch[i].image_id) != str(batch[i+1].image_id):
+    #       print('BAD')
+    #       break
+    # for i in range(len(batch)):
+    #   if i<len(batch)-3:
+    #     print(batch[i].image_id,'1 again')
+    #     print(batch[i+1].image_id,'2 again')
+    #print(batch[0].task,'batch task')
+    print(len(batch),'batch size')
     for ex in batch:
+      
+
+      
       # print(ex.image_id,'image id')
       # print(ex.index_of_class,'index of class')
       #print(ex.target_answer,'target answer')
       if ex.correct_answer!= None:
         mil_answers.append(ex.correct_answer)
+      #print('Appended indicies')
       indicies.append(ex.index_of_class)
       q = ex.query[np.random.randint(0, len(ex.query))]
-
+  
       if ex.target_answer is None or len(ex.target_answer) == 0:
         # This is a bit messy since it conflates no output text requested (therefore, a
         # detection examples) with an unlabelled example (predicting a caption with no known label),
@@ -95,6 +155,7 @@ class CollateWithTokenizer(Callable):
     #print(len(queries),'query length 1')
 
     image_data = self.image_collater.collate(batch)
+    #print('Collated image data')
     image_inputs, box_targets = image_data
     #print(len(box_targets),'box targets')
     #print(image_inputs.size(),'image inputs size')
@@ -114,14 +175,16 @@ class CollateWithTokenizer(Callable):
       segmentation_labels = [None for _ in batch]
     else:
       segmentation_labels = [None for _ in batch]
-    #print(len(batch),'batch size here')
+    #print(len(batch),'batch size here'[])
     labels = GpvBatchLabels(
       [x.task for x in batch],
       answers["input_ids"],
       box_targets,
       segmentation_labels=segmentation_labels,index_of_class=indicies,mil_labels=mil_answers
     )
+    #print('Gathered labels')
     #print(labels.index_of_class,'index of class collate')
+    #pprint(labels,'labels')
     out = dict(
       input_ids=queries["input_ids"],
       input_mask=queries["attention_mask"],

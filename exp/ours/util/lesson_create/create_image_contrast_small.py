@@ -5,6 +5,7 @@ from tqdm import tqdm
 UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse', 
              'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
+SMALL = ['bed']
 SEEN = ['dog']
 
 #go through each concept 
@@ -78,7 +79,7 @@ def main():
     ids_used = set()
     id_to_use = 0
     contrast_group = 0
-    for i,coco_class in enumerate(UNSEEN_COMBINED):
+    for i,coco_class in enumerate(SMALL):
         if coco_class != 'remote':
             for web_c in tqdm(coco_cat_to_web[coco_class]):
             #web_class_to_search = np.random.choice(coco_cat_to_web[coco_class],1)
@@ -109,8 +110,8 @@ def main():
                         image_contrast_data.append(entry)
                     contrast_group += 1
     print(len(image_contrast_data),'length of image contrast data')
-    io.dump_json_object(image_contrast_data,'/data/michal5/gpv/lessons/image_contrast_3.json')
-    io.dump_json_object(image_contrast_data,'/shared/rsaas/michal5/gpv_michal/lessons/image_contrast_3.json')
+    io.dump_json_object(image_contrast_data,'/data/michal5/gpv/lessons/image_contrast_small.json')
+    io.dump_json_object(image_contrast_data,'/shared/rsaas/michal5/gpv_michal/lessons/image_contrast_small.json')
     
 
 

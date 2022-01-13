@@ -18,33 +18,38 @@ import numpy as np
 ID_LIST = set([0])
 LAST_ID = 0
 @dataclass
-class MILExample:
+class TextContrastExample:
   """
-  Consists of positive and negative examples for different classes 
+  Contrast grouping: refers to which group of image contrast examples (in each group there is one target image and multiple reference images)
+  is_target: is target image 
+  batches consist of contrast groups 
+  initially there will be one contrast group per batch
   """
 
   gpv_id: str
   image_id: Union[int, str]
   answer: str
-  query: str  
-  correct_answer: str
+  query: str 
+  contrast_group: str
+  is_in_category: bool 
   rel_query: str
 
 
 
   @property
   def task(self):
-    return Task.MIL
+    return Task.TEXTCONTRAST
 
   def get_gpv_id(self):
     return self.gpv_id
 
 
-@Dataset.register("mil")
-class MILDataset(Dataset):
+@Dataset.register("text-contrast")
+class TextContrastDataset(Dataset):
 
   def __init__(self, split: str,):
-
+    if split not in {"test", "val", "train"}:
+      raise ValueError(split)
     
 
     self.split = split
@@ -52,10 +57,10 @@ class MILDataset(Dataset):
 
 
   def get_task(self) -> Task:
-    return Task.MIL
+    return Task.TEXTCONTRAST
 
-  def load(self) -> List[MILExample]:
-    instances = load_mil(self.split)
+  def load(self) -> List[TextContrastExample]:
+    instances = load_text_contrast(self.split)
     
     return instances
 
@@ -71,15 +76,13 @@ def generate_id():
   ID_LIST.add(LAST_ID)
   return LAST_ID 
 
-def load_mil(split):
+def load_text_contrast(split):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
   #file = file_paths.IMAGECONTRAST_DIR+'/train_large_2.json'
   #file = '/data/michal5/gpv/text_contrast/train_large.json'
-  if split == 'small':
-    file = '/data/michal5/gpv/lessons/mil_small.json'
-  else:
-    file = '/data/michal5/gpv/lessons/mil_train.json'
-  logging.info(f"Loading mil data from {file}")
+  #file = '/data/michal5/gpv/lessons/text_contrast_train_10_per_group.json'
+  file = '/data/michal5/gpv/lessons/text_contrast_train_15_per_group.json'
+  logging.info(f"Loading text contrast data from {file}")
   raw_instances = load_json_object(file)
   out = []
   for i, x in enumerate(raw_instances):
@@ -90,9 +93,9 @@ def load_mil(split):
     else:
       image_id = x["image"]
 
-    ex = MILExample(gpv_id=x['gpv_id'],image_id=image_id,answer=x['answer'],
-      query=x['query'],correct_answer=x['correct'],rel_query=x['rel_query']
-        )
+    ex = TextContrastExample(gpv_id=x['gpv_id'],image_id=image_id,answer=x['answer'],
+    query=x['query'],contrast_group=x['contrast_group'],is_in_category=x['is_in_category'],rel_query=x['rel_query']
+      )
     out.append(ex)
     
   return out

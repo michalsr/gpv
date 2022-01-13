@@ -18,6 +18,7 @@ class Task(FromParams, enum.Enum):
   IMAGECONTRAST = "imagecontrast" #lesson
   TEXTCONTRAST = "textcontrast" #lesson
   MIL = "mil" #lesson 
+  SYNONYM = "synonym" #lesson
 
 
   @classmethod

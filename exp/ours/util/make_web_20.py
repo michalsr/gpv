@@ -3,11 +3,11 @@ import utils.io as io
 # UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
 #              'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
 #              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
-# UNSEEN2 = ['banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
-#              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
+UNSEEN1 = ['banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
+             'hot dog', 'keyboard', 'laptop', 'train', 'tv']
 
-UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
-'sheep', 'suitcase', 'surfboard', 'wine glass']
+# UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
+# 'sheep', 'suitcase', 'surfboard', 'wine glass']
 
 web_20_entries = []
 web_80 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/gpv_split/test.json')
@@ -28,6 +28,8 @@ for entry in web_80:
 print(len(web_20_entries))
 print(len(web_80))
 io.dump_json_object(web_20_entries,'/data/michal5/gpv/learning_phase_data/coco_detection/unseen_10/test.json')
+io.dump_json_object(web_20_entries,'/shared/rsaas/michal5/gpv_michal/unseen_10/test.json')
+
 # print(len(web_20_entries))
 # io.dump_json_object(web_20_entries,'/data/michal5/gpv/learning_phase_data/web_20/test_image_info.json')
 # new_train_data = []

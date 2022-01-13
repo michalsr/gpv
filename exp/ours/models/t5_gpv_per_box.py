@@ -1,3 +1,4 @@
+from copy import Error
 import logging
 from typing import Union, Tuple, Dict, Optional, Callable, List
 
@@ -6,7 +7,7 @@ import torchvision.ops
 from allennlp.common import Params
 from dataclasses import dataclass
 from transformers import AutoTokenizer, AutoConfig, PreTrainedTokenizer
-
+import pdb
 from exp.ours.data.dataset import Task
 from exp.ours.data.gpv import COCO_CATEGORIES
 from exp.ours.data.gpv_example import GPVExample
@@ -39,13 +40,13 @@ class CollateLocalizationLabels:
     per_box_labels = []
     for ex in batch:
       #print(ex.task==Task.IMAGECONTRAST,'task')
-      if ex.task == Task.DETECTION or ex.task == Task.IMAGECONTRAST or ex.task == Task.MIL:
+      if ex.task == Task.DETECTION or ex.task == Task.IMAGECONTRAST or ex.task == Task.MIL or ex.task == Task.SYNONYM or ex.task == Task.TEXTCONTRAST:
         assert ex.relevance_query is not None
         #print('examples')
         per_box_labels.append(ex.relevance_query)
       else:
         per_box_labels.append(self.tokenizer.pad_token)
-    print(per_box_labels,'per box labels')
+    print(per_box_labels,len(per_box_labels),'per box labels')
     labels = self.tokenizer(
       per_box_labels, return_tensors='pt', padding=True, truncation=True)
     return dict(relevance_queries=labels["input_ids"].view(len(batch), -1))
@@ -428,6 +429,7 @@ class T5GpvPerBox(GPVModel):
     of per-box generation log-probabilities
     """
     device = contextual_emb.device
+    #print('made it to line 431')
     if self.use_image_sep:
       # Make sure to include the image seperator
       raise ValueError()
@@ -436,23 +438,25 @@ class T5GpvPerBox(GPVModel):
       # -100 marks a label as not a target
       relevance_query = relevance_query.masked_fill(
         relevance_query == self.tokenizer.pad_token_id, -100)
-
+    #print('made it to line 440')
     if not include_query:
       if self.query_box is not None:
         assert self.query_box == "always"
         n_boxes = n_boxes - 1
-
+    #print('made it to line 445')
     per_box_inputs_lst = []
     per_box_outputs_lst = []
     ixs = []
     for i, task in enumerate(tasks):
-      if not (task == Task.DETECTION or task == Task.IMAGECONTRAST or task == Task.MIL):
+      if not (task == Task.DETECTION or task == Task.IMAGECONTRAST or task == Task.MIL or task==Task.SYNONYM or task==Task.TEXTCONTRAST):
         continue
+      #print('made it to line 452')
       ixs.append(i)
       if self.box_context == "none" or self.box_context is None:
         context = None
       elif self.box_context == "query":
         assert self.query_box == "always"
+        #print('made it to line 458')
         query_start = n_boxes[i]
         context = contextual_emb[i, query_start:input_mask[i].sum()]
       else:
@@ -460,14 +464,15 @@ class T5GpvPerBox(GPVModel):
           ix = input_mask[i].sum() - 1
         else:
           raise ValueError()
-        context = contextual_emb[i, ix].unsqueeze(0)
 
+        context = contextual_emb[i, ix].unsqueeze(0)
+      #print('made it to line 468')
       box_emb = contextual_emb[i, :n_boxes[i]].unsqueeze(1)
 
       if context is not None:
         context = context.unsqueeze(0).repeat(box_emb.size(0), 1, 1)
         box_emb = torch.cat([box_emb, context], 1)
-
+      #print('made it to line 474')
       per_box_inputs_lst.append(box_emb)
       per_box_outputs_lst.append(relevance_query[i].unsqueeze(0).repeat(box_emb.size(0), 1))
 
@@ -485,13 +490,14 @@ class T5GpvPerBox(GPVModel):
         device=device, dtype=torch.float
       )
       #print(batched_rel_scores.size(),'batched rel scores')
-
+    #print('made it to line 492')
     if len(ixs) == 0:
       #print('hi')
       return batched_rel_scores
-
+    #print('made it to line 496')
     per_box_inputs, per_box_mask = our_utils.stack_and_pad_blocks(per_box_inputs_lst)
     per_box_outputs = torch.cat(per_box_outputs_lst, 0)
+    #print('made it to line 499',  per_box_inputs.size(0) == per_box_outputs.size(0))
     assert per_box_inputs.size(0) == per_box_outputs.size(0)
     total_boxes = per_box_inputs.size(0)
 
@@ -501,24 +507,31 @@ class T5GpvPerBox(GPVModel):
       labels=per_box_outputs,
       return_dict=True,
     )
+    #print('made it to line 510')
+    #print(per_box_outputs.view(-1),'per box outputs')
+    
     dim = t5_out.logits.size(-1)
     per_label_score = F.cross_entropy(
       t5_out.logits.view(-1, dim), per_box_outputs.view(-1), reduction="none")
-    
+    #print('made it to line 516')
     per_label_score = -per_label_score.view(total_boxes, -1).sum(1)
     #print(per_label_score,'per label score')
+    #print('made it to line 519')
     if self.contrast_query is not None:
       c_labels = self.contrast_query_tok.unsqueeze(0).repeat(total_boxes, 1)
+      #print('made it to line 522')
       contrast_query_out = self.model(
         encoder_outputs=(per_box_inputs,),
         attention_mask=per_box_mask,
         labels=c_labels,
         return_dict=True,
       )
-
+      #print('made it to line 525')
       c_per_label_score = F.cross_entropy(
         contrast_query_out.logits.view(-1, dim), c_labels.view(-1), reduction="none")
+      #$print('made it to line 532')
       c_per_label_score = -c_per_label_score.view(total_boxes, -1).sum(1)
+      #print('made it to line 534')
       per_label_score = torch.stack([per_label_score, c_per_label_score], -1)
       #print(per_label_score.size(),'per label score')
 
@@ -533,18 +546,33 @@ class T5GpvPerBox(GPVModel):
 
   def forward(self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
               relevance_queries) -> Tuple[torch.Tensor, Dict[str, float]]:
-
+    #print(input_ids,'input ids')
+    #print('made it here')
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
+    #print('Encoded the image')
     #print(len(input_ids),'input ids')
     # per_box_scores = self.compute_per_box_score(
     #   labels.tasks, encoder_outputs.last_hidden_state,
     #   image_features.get_n_boxes(), relevance_queries, input_mask, True)
     per_box_scores = self.compute_per_box_score(
-      labels.tasks, encoder_outputs.last_hidden_state,
-      image_features.get_n_boxes(), relevance_queries, input_mask, True)
+        labels.tasks, encoder_outputs.last_hidden_state,
+        image_features.get_n_boxes(), relevance_queries, input_mask, True)
+    # try:
+     
+    #   #print(per_box_scores.size(),'perbox scores')
+    #   #print('Computed box scores')
+    # except RuntimeError:
+    #   print(encoder_outputs.last_hidden_state,input_mask.size(),image_features.get_n_boxes(),relevance_queries,input_mask)
+    
+    
     #print(per_box_scores.size(),'per box scores size')
     rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
+    # try:
+      
+    # except UnboundLocalError:
+    #   raise UnboundLocalError
     #print(rel.size(),'relevance scores')
+    #print('Computed relevance')
     t5_out = self.model(
       encoder_outputs=encoder_outputs,
       attention_mask=input_mask,
@@ -552,7 +580,7 @@ class T5GpvPerBox(GPVModel):
       return_dict=True,
     )
     #print(labels.text_labels,'text labels')
-
+    #print('Computed out')
     if not self.predict_trailing_pad_tokens:
       # -100 marks a label as not a target
       labels.text_labels = labels.text_labels.masked_fill(
@@ -562,10 +590,11 @@ class T5GpvPerBox(GPVModel):
     n_boxes = image_features.n_boxes
     #print(rel.size(),'relevance size')
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
+    #print('Computed batch pred')
     #print(rel,'batch pred')
     #print(batch_pred,'batch pred')
     loss, monitor = self.loss(batch_pred, labels)
-
+    #print('Computed loss')
     return loss, monitor
 
 
@@ -645,7 +674,7 @@ class T5GpvPerBox(GPVModel):
       raise NotImplementedError("Predict requires all examples have the same batch")
     #print(task,'TASK')
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
-    if task == Task.DETECTION or task == Task.IMAGECONTRAST:
+    if task == (Task.DETECTION or Task.IMAGECONTRAST or Task.TEXTCONTRAST or Task.SYNONYM or Task.MIL):
       #print('hi using this')
       per_box_scores = self.compute_per_box_score(
         labels.tasks, encoder_outputs.last_hidden_state,

@@ -388,8 +388,8 @@ def main():
 
   if args.output_dir and args.output_name:
     raise ValueError("Cannot specify output_name and output_dir")
-
-  models = our_utils.find_models('outputs/mil_fix')
+  model_to_eval = 'outputs/seen_60_only_gpv_per_box'
+  models = our_utils.find_models(model_to_eval)
   print(models)
   # if len(models) == 0:
   #   logging.info("No models selected")
@@ -402,8 +402,8 @@ def main():
   #     raise ValueError("Cannot use one output dir if more than one model selected!")
   #model = models[0]
 
-  datasets = get_datasets_from_args(args, 'outputs/mil_fix')
-  eval_on(args, 'outputs/mil_fix', datasets[0], devices, skip_existing=False)
+  datasets = get_datasets_from_args(args, model_to_eval)
+  eval_on(args,model_to_eval, datasets[0], devices, skip_existing=False)
   #   print(dataset.split_txt)
   #   dataset.change_split("gpv_split")
   #   if len(datasets) > 1:

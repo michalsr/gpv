@@ -145,7 +145,24 @@ class StratifiedSubsetSampler(Sampler):
     else:
       s, e = self.bounds[self.rank]
       return e - s
+class SynonymSampler():
+  """Naive sampler for synonyms. Need to match pairs."""
+  def __init__(self,training_examples):
+    self.training_examples = training_examples 
+  def __len__(self):
+    return len(self.training_examples)
+  def __iter__(self):
+    batch = []
+    for i in range(len(self.training_examples)):
 
+      if self.training_examples[i][0].image_id == self.training_examples[i][1].image_id:
+        batch.append(torch.tensor([i]))
+        
+      else:
+        print('PROBLEM')
+        break 
+    batch = torch.stack(batch)
+    yield batch 
 class ImageContrastSampler():
   """Naive sampler for image contrast. We need to make sure that each batch contains images from the same category. 
   - Compute map from categories to indicies

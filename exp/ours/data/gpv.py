@@ -38,7 +38,7 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
     raise NotImplementedError(kind)
   if ds == "web_80":
     split_txt = ""
-  split_txt = "unseen"
+  split_txt = "unseen_10"
   #split_txt = "gpv_split"
   # elif unseen_split==True:
   #   split_txt = "held_out_all"
@@ -46,6 +46,8 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
   #   split_txt = "original_split"
   target_file = join(file_paths.SOURCE_DIR, ds, split_txt, f"{split}.json")
   logging.info(f"Loading instances from {target_file}")
+  g = load_json_object(target_file)
+  logging.info(f'{len(g)} total number of instances')
   return load_json_object(target_file)
 
 

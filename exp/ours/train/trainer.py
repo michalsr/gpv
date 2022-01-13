@@ -8,6 +8,10 @@ from collections import defaultdict, Counter
 from datetime import datetime
 from os import mkdir, makedirs, getpid
 from time import perf_counter
+import random
+import gc
+import pdb
+from torch.jit import Error 
 import h5py
 import torch
 from numbers import Number
@@ -25,7 +29,7 @@ from torch import distributed as dist
 from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
 from exp.ours.train import evaluator
 from exp.ours import file_paths
-from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler,ImageContrastSampler
+from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler,ImageContrastSampler, SynonymSampler
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset, Task
 from exp.ours.models.model import GPVModel
@@ -222,7 +226,7 @@ class RunArgs(FromParams):
 
   @staticmethod
   def build(args: 'DeviceArgsType', force_one_process=False,
-            grad_accumulation=1, num_workers=None, seed=None, dist_port=None, dist_backend="nccl"):
+            grad_accumulation=1, num_workers=num_workers, seed=None, dist_port=None, dist_backend="nccl"):
     if isinstance(args, RunArgs):
       return args
     if args is None:
@@ -245,7 +249,7 @@ class RunArgs(FromParams):
     else:
       dist_port = f'tcp://localhost:64801'
     return RunArgs(args, grad_accumulation=grad_accumulation,
-                   num_workers=num_workers, seed=seed, dist_url=dist_port)
+                   num_workers=0, seed=seed, dist_url=dist_port)
 
 
 # Arguements we can use to specify the device
@@ -348,6 +352,7 @@ class Trainer(FromParams):
   find_unused_parameters: bool = True
   end_at_epoch: Optional[int] = None
   eval_loader: DataLoaderBuilder = None
+  output_dir: Optional[str] = None
 
   # Should we balance the different train dataset between batches
   stratify: bool = False
@@ -360,7 +365,7 @@ class Trainer(FromParams):
   eval_at_start: bool = False
   checkpoint: bool = False
   train_val_log: Optional[List[Tuple[ResultKey, str]]] = None
-
+  best_val: int = None
   # Cosmetic/Logging
   tb_log_intervals: int = 20
   tb_log: bool = True
@@ -583,11 +588,17 @@ class Trainer(FromParams):
                         runtime: RunArgs):
     id_sets = set()
     all_train = []
+    new_all_train = []
  
       
     for grp in training_examples:
+      # if grp[0].task == Task.IMAGECONTRAST:
+    
+      #   new_all_train.append([model.preprocess_example_train(x) for x in grp])
+      
       all_train.append(py_utils.flatten_list(model.preprocess_example_train(x) for x in grp))
     all_train_sizes = [len(x) for x in all_train]
+
 
     all_train = py_utils.flatten_list(all_train)
     for x in all_train:
@@ -616,9 +627,80 @@ class Trainer(FromParams):
         world_size, rank = None, None
 
       samples = [x.train_sample for x in self.train_datasets]
+      #print(all_train[0],all_train[1])
       # sampler = StratifiedSubsetSampler(
       #   all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
-      if all_train[0].correct_answer != None:
+      # print(all_train[0].task,'task')
+      # print(all_train[0].task == 'synonym')
+      # print(all_train[0].task == Task.SYNONYM)
+      # if type(all_train[0]) == list:
+      #   all_train = new_all_train
+      print(all_train[0].task)
+      #pdb.set_trace()
+      if all_train[0].task == Task.SYNONYM:
+        new_all_train = []
+        for i in range(0,len(all_train),2):
+        #   print(all_train[i].image_id == all_train[i+1].image_id)
+          new_all_train.append([all_train[i],all_train[i+1]])
+        all_train = new_all_train
+        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(all_train))),batch_size=8,drop_last=True)
+      
+        # print(new_all_train[10][0].id,'before')
+        # random.shuffle(new_all_train)
+        # print(new_all_train[10][0].id,'after')
+        # print(new_all_train[10][1].id,'after')
+        #sampler = SynonymSampler(new_all_train)
+        #all_train = new_all_train
+        #sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(new_all_train),batch_size=3,drop_last=True)
+      # if len(all_train[0]) == 2:
+      #sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(all_train),batch_size=2,drop_last=True)
+
+      elif all_train[0].task == Task.IMAGECONTRAST or all_train[0].task == Task.TEXTCONTRAST:
+        new_all_train = []
+        train_dict = {}
+        for t in all_train:
+          if t.meta not in train_dict:
+            train_dict[int(t.meta)] = []
+          train_dict[int(t.meta)].append(t)
+        new_all_train = list(train_dict.values())
+
+
+
+        # new_all_train = []
+        # for i in range(0,len(all_train),16):
+        #   # for j in all_train[i:i+16]:
+        #   #   print(j.index_of_class,'idx class')
+        #   new_all_train.append(all_train[i:i+15])
+        
+        #   # print(new_all_train)
+        #   # print(new_all_train[0][0].index_of_class,'contrast group 1')
+        #   # print(new_all_train[0][15].index_of_class,'contrast group 2')
+        # for entry in new_all_train:
+        #   idx = entry[0].index_of_class
+        #   for v in entry:
+        #     if int(v.index_of_class) != int(idx):
+        #       print(idx,v.index_of_class)
+        #       raise Error
+        # print(len(new_all_train),len(all_train),'all train and new all train')
+        all_train = []
+        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(new_all_train))),batch_size=1,drop_last=True)
+        for i in new_all_train:
+          if new_all_train[0][0].task == Task.IMAGECONTRAST:
+            if len(i)>= 16:
+              all_train.append(i)
+          if new_all_train[0][0].task == Task.TEXTCONTRAST:
+            if len(i)>=10:
+              all_train.apppend(i)
+
+            # if len(i) >16:
+            #   print('larger than 16')
+        #all_train = new_all_train
+        # for ex in all_train:
+        #   if ex.task != Task.IMAGECONTRAST or ex.task != Task.TEXTCONTRAST:
+        #     raise ValueError
+        print(len(all_train),'length of all train')
+        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(all_train))),batch_size=1,drop_last=True)
+      elif all_train[0].correct_answer != None:
         sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(all_train),batch_size=16,drop_last=True)
       else:
         sampler = ImageContrastSampler(all_train)
@@ -636,6 +718,7 @@ class Trainer(FromParams):
       prev_batch_size = batch_size
       batch_size = batch_size // batch_groups
       logging.info(f"Accumulating total of {prev_batch_size} through {batch_groups} size {batch_size} batches")
+    #can change number of workers for loader here 
 
     loader = self.train_loader.build(
       all_train, model.get_collate(True),
@@ -762,6 +845,8 @@ class Trainer(FromParams):
       to_save["step"] = global_step
       with open(join(eval_dir, "eval.json"), "w") as fh:
         json.dump(to_save, fh, indent=2)
+      save = {'val_score':result.values()}
+      
 
     dataset_to_task = {}
     for k in self.train_datasets + self.eval_datasets:
@@ -1030,6 +1115,7 @@ class Trainer(FromParams):
     logging.info("Preparing training loader")
     if training_examples is None:
       training_examples = self._load_and_log_train()
+    #print(training_examples,'training examples')
 
     train_loader, n_train_batches, tr_sampler = self._get_train_loader(_base_model, training_examples, runtime)
     logging.info("Preparing evaluation")
@@ -1078,21 +1164,31 @@ class Trainer(FromParams):
     logging.info(f"Have {n_train} params and {n_freeze} frozen parameters")
 
     for epoch in range(train_state.epoch, self.epochs):
+     
       ep_start = perf_counter()
       model.train()
 
       if hasattr(tr_sampler, "set_epoch"):
         # Some samplers need set_epoch to be set each epoch
         tr_sampler.set_epoch(epoch)
-
+      #pdb.set_trace()
+      
       if is_primary():
         pbar = tqdm(train_loader, disable=not self.epoch_pbar, ncols=100, desc="loss=", total=n_train_batches)
       else:
         # We don't just use tqdm(... disable=True) since that seems to cause visual
         # issues in multi-process settings
         pbar = train_loader
-
+      # print(list(pbar))
+      # print(n_train_batches,'n train batches')
+      # print(len(train_loader),'train loader')
+      # print(len(pbar),'pbar')
+      #print(pbar[0])
+      # for i,y in enumerate(pbar):
+      #   print(i)
+      #   print('hello I made it here')
       for batch in pbar:
+        print('new batch')
         # Backprop/collect monitor information
         if runtime.grad_accumulation > 1:
           n = len(batch)
@@ -1126,7 +1222,20 @@ class Trainer(FromParams):
           monitor = {k: v for k, v in monitor.items()}
         else:
           #print(batch['labels'].index_of_class,'labels in trainer')
+          print(self.num_no_change_val,'num no change val')
+          print(self.upper_bound_no_change,'upper bound')
+          num_objects = 0
+          for obj in gc.get_objects():
+            try:
+              if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                # print(type(obj), obj.size())
+                num_objects+=1 
+             
+            except:
+              pass
+          print(num_objects,'num objects')
           batch = our_utils.to_device(batch, device)
+          
          
          
 
@@ -1212,7 +1321,15 @@ class Trainer(FromParams):
       eval_dir = self._get_train_eval_dir(run_dir, epoch, global_step)
       results = self._run_eval(_base_model, eval_runners, global_step, runtime.seed, eval_dir)
       eval_end = perf_counter()
-
+      val_score = list(results.values())[0]
+      if self.best_val == None:
+        self.best_val = int(val_score)
+      else:
+        if val_score > self.best_val:
+          self.best_val = val_score
+        else:
+          self.num_no_change_val += 1
+      logging.info(f"{self.upper_bound_no_change-self.num_no_change_val} epochs remaining")
       self._log_results(results, summary_writer, global_step, eval_end-eval_start, eval_dir)
 
       if summary_writer:
@@ -1221,6 +1338,10 @@ class Trainer(FromParams):
 
       if self.best_model_key and is_primary():
         score = self._get_model_score(results)
+        score_dict = {"val":list(results.values())[0]}
+        dump_json_object(score_dict,run_dir+'/val_score.json')
+
+          
         if best_saved_score is None or best_saved_score < score:
           prefix = "Saving as" if run_dir else "Found"
           if best_saved_score is None:
@@ -1231,8 +1352,8 @@ class Trainer(FromParams):
           if run_dir:
             best_model_file = join(run_dir, file_paths.BEST_STATE_NAME)
             torch.save(_base_model.state_dict(), best_model_file)
-      if not self.best_model_key:
-        self.num_no_change_val + 1
+      # if not self.best_model_key:
+      #   self.num_no_change_val += 1
     
 
       if (run_dir is not None and

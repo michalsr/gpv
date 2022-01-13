@@ -1,3 +1,14 @@
+# Files relevant for auto-selection
+Lessons:
+- Dataset files: (all with prefix ```exp/ours/data/```): image_contrast.py,mil.py,synonym.py,text_contrast.py
+- Train lessons indiviudally: ```exp/ours/experiments/train_t5_lesson.py```
+- Losses for lessons: ```exp/ours/models/losses.py````
+- Other processing files: ```exp/ours/models/gpv1_preprocessing.py```, ```exp/ours/models/model_utils.py``` (collate)
+- Creating json files for lessons: ```exp/ours/utils/lesson_create/```
+Auto-Select:
+- Main file is ```exp/ours/experiments/train_t5_lesson_select.py```
+- References above files and general training files 
+- Parameters for auto-select in ```params.py``` file
 # Towards General Purpose Vision Systems
 By [Tanmay Gupta](http://tanmaygupta.info/), [Amita Kamath](https://nlp.stanford.edu/~kamatha/), [Aniruddha Kembhavi](https://anikem.github.io/), and [Derek Hoiem](https://dhoiem.cs.illinois.edu/)
 

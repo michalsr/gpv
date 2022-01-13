@@ -1,6 +1,7 @@
 import collections
+from logging import ERROR
 from typing import List, Optional, Dict
-
+import pdb 
 import numpy as np
 import torch
 import torchvision.ops
@@ -153,8 +154,8 @@ class DetrLocalizationLoss(LocalizationLoss):
       ))
 
     losses = self.set_criterion(outputs, target_dicts)
-    to_return = ['loss_ce']
-    # to_return = ['loss_ce', 'loss_bbox', 'loss_giou']
+    #to_return = ['loss_ce']
+    to_return = ['loss_ce', 'loss_bbox', 'loss_giou']
     out = {}
     total_loss = 0
     for k in to_return:
@@ -233,13 +234,33 @@ class BasicGPVLoss(GPVLoss):
       if p[0] < min_val:
         min_val = p[0]
     return min_val 
-  def contrastive_loss(self,logits,batch_labels):
+  def image_contrastive_loss(self,logits,batch_labels):
+
     final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
     target_index = int(batch_labels.index_of_class[0])
+    for idx in batch_labels.index_of_class:
+      if int(idx) != target_index:
+        raise ERROR
     if not os.path.exists('exp/ours/target_index.json'):
       io.dump_json_object(target_index,'exp/ours/target_index.json')
     #losses =torch.zeros(16)
-    targets = torch.zeros(16)
+    targets = torch.zeros(len(batch_labels.index_of_class))
+    targets[target_index] = 1
+    targets.to("cuda:0")
+    loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),targets.cuda()).cuda()
+    #loss = F.nll_loss(filtered_logits.cuda(),targets.type(torch.LongTensor).cuda()).cuda()
+    return loss
+  def text_contrastive_loss(self,logits,batch_labels):
+
+    final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
+    target_index = int(batch_labels.index_of_class[0])
+    for idx in batch_labels.index_of_class:
+      if int(idx) != target_index:
+        raise ERROR
+    if not os.path.exists('exp/ours/target_index.json'):
+      io.dump_json_object(target_index,'exp/ours/target_index.json')
+    #losses =torch.zeros(16)
+    targets = torch.zeros(len(batch_labels.index_of_class))
     targets[target_index] = 1
     targets.to("cuda:0")
     loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),targets.cuda()).cuda()
@@ -259,6 +280,30 @@ class BasicGPVLoss(GPVLoss):
       loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),torch.FloatTensor(batch_labels).cuda()).cuda()
       print(loss,'loss')
       return loss 
+  def syn_loss(self,logits_1,logits_2):
+      #Size is Bxnum_boxesxrelevance scores
+      
+      logits_1 = logits_1[:,:,0]
+      logits_2 = logits_2[:,:,0]
+      print(logits_2.size(),'logits')
+      max_logits,ind = torch.max(logits_2,dim=(1))
+      values = torch.zeros(logits_2.size())
+      #print(values.size())
+      #better way to do this 
+      for i in range(values.size()[0]):
+        values[i,ind[i]] = 1
+      # values[0,ind[0]] = 1
+      # values[1,ind[1]] = 1
+      values = torch.FloatTensor(values).to("cuda:0")
+      #print(logits_1.device)
+      loss = F.binary_cross_entropy_with_logits(logits_1,values)
+      return loss 
+
+      # print(values,'values')
+
+      # print(x,'logits')
+
+
   def forward(self, prediction: GpvBatchPrediction, batch_labels: GpvBatchLabels):
     task_to_ix = collections.defaultdict(list)
     for i, task in enumerate(batch_labels.tasks):
@@ -268,6 +313,8 @@ class BasicGPVLoss(GPVLoss):
     losses = {}
     total_loss = 0
     for task, ix_lst in task_to_ix.items() :
+      print(task==Task.TEXTCONTRAST,'task')
+      #pdb.set_trace()
       ixs = torch.as_tensor(ix_lst, device=labels.device, dtype=torch.long)
       n_boxes = prediction.n_boxes
       if task == Task.DETECTION:
@@ -277,13 +324,22 @@ class BasicGPVLoss(GPVLoss):
           [batch_labels.box_targets[i] for i in ix_lst])
         losses.update(log)
         task_loss = total
-      elif task == Task.MIL:
-        loss = self.mil(prediction.pred_rel[ixs],batch_labels.mil_labels)
+      elif task == Task.SYNONYM:
+        print(prediction.pred_rel.size(),'size')
+        ix_1 = torch.as_tensor([j for j in ix_lst if j%2 ==0],device=labels.device,dtype=torch.long)
+        ix_2 = torch.as_tensor([j for j in ix_lst if j%2 ==1],device=labels.device,dtype=torch.long)
+        loss = self.syn_loss(prediction.pred_rel[ix_1],prediction.pred_rel[ix_2])
         losses[str(task) + "-loss"] = loss
         task_loss = loss
+      elif task == Task.MIL:
+        loss = self.mil(prediction.pred_rel[ixs],batch_labels.mil_labels)
+        losses[str(task) + "-loss"] = loss 
+        task_loss = loss
       elif task == Task.IMAGECONTRAST:
-        #print(prediction.pred_rel[ixs],'relative predition')
-        loss = self.contrastive_loss(prediction.pred_rel[ixs],batch_labels)
+        #print(prediction.pred_rel[ixs],'relative predition')\
+        print('using this')
+        print(batch_labels,'batch labels')
+        loss = self.image_contrastive_loss(prediction.pred_rel[ixs],batch_labels)
         losses[str(task) + "-loss"] = loss
         task_loss = loss
         #print(task_loss,'task loss')
@@ -293,6 +349,12 @@ class BasicGPVLoss(GPVLoss):
         #   [batch_labels.box_targets[i] for i in ix_lst])
         # losses.update(log)
         # task_loss = total
+      elif task == Task.TEXTCONTRAST:
+        print('using this')
+        print(batch_labels,'batch labels')
+        loss = self.text_contrastive_loss(prediction.pred_rel[ixs],batch_labels)
+        losses[str(task) + "-loss"] = loss
+        task_loss = loss
       elif task == Task.SEGMENTATION:
         segmentation_labels = [batch_labels.segmentation_labels[i] for i in ix_lst]
         raise NotImplementedError()

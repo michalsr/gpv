@@ -48,8 +48,7 @@ class ImageContrastExample:
 class ImageContrastDataset(Dataset):
 
   def __init__(self, split: str,):
-    if split not in {"test", "val", "train"}:
-      raise ValueError(split)
+ 
     
 
     self.split = split
@@ -76,12 +75,16 @@ def generate_id():
   ID_LIST.add(LAST_ID)
   return LAST_ID 
 
-def load_image_contrast(split):
+def load_image_contrast(split=None):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
   #file = file_paths.IMAGECONTRAST_DIR+'/train_large_2.json'
   #file = '/data/michal5/gpv/text_contrast/train_large.json'
   file = '/data/michal5/gpv/lessons/image_contrast_train.json'
-  logging.info(f"Loading webqa data from {file}")
+  if split == 'small':
+    file = '/data/michal5/gpv/lessons/image_contrast_small.json'
+  elif split == 'large':
+    file = '/data/michal5/gpv/lessons/image_contrast_2.json'
+  logging.info(f"Loading image contrast data from {file}")
   raw_instances = load_json_object(file)
   out = []
   for i, x in enumerate(raw_instances):

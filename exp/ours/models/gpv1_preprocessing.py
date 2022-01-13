@@ -7,7 +7,9 @@ from exp.ours.data.dataset import *
 import torchvision.transforms as T
 import numpy as np
 from exp.ours.data.image_contrast import ImageContrastExample
+from exp.ours.data.text_contrast import TextContrastExample
 from exp.ours.data.mil import MILExample
+from exp.ours.data.synonym import SynonymExample
 from exp.ours.data.webqa import WebQaExample
 from exp.ours.data.webqa_templates import WebQaQueryGenerator
 
@@ -170,6 +172,33 @@ class Gpv1Preprocessor(FromParams):
         query=[self.preprocess_text(example.query)],
         target_answer=answer,meta=example.contrast_group,correct_answer=None,index_of_class=example.answer,relevance_query=example.rel_query
       )]
+    
+    elif isinstance(example,TextContrastExample):
+      answer = self.preprocess_text(example.answer)
+      #final_answer = np.append(answer,int(example.answer))
+      # out = [GPVExample(
+      #   example.gpv_id, example.task, example.image_id,
+      #   query=[self.preprocess_text(example.query)],
+      #    target_answer=final_answer,meta=example.contrast_group,index_of_class=example
+      #  )]
+      #print(example.contrast_group)
+      #print(self.preprocess_text(example.answer).append('1'),'example answer')
+      #print(example.rel_query,'rel query')
+   
+      out = [GPVExample(
+        example.gpv_id, example.task, example.image_id,
+        query=[self.preprocess_text(example.query)],
+        target_answer=answer,meta=example.contrast_group,correct_answer=None,index_of_class=example.answer,relevance_query=example.rel_query
+      )]
+    elif isinstance(example,SynonymExample):
+
+
+        
+        answer = self.preprocess_text(str(example.answer))
+        
+        out = [GPVExample(example.gpv_id,example.task,example.image_id,query=[self.preprocess_text(example.query)],
+        target_answer=answer,correct_answer=None,index_of_class=None,relevance_query=example.rel_query)]
+       
     elif isinstance(example,MILExample):
       print(example.image_id)
       print(example.query,'query')
