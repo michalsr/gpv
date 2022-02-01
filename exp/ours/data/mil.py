@@ -43,11 +43,12 @@ class MILExample:
 @Dataset.register("mil")
 class MILDataset(Dataset):
 
-  def __init__(self, split: str,):
+  def __init__(self, split: str,raw_instances=None):
 
     
 
     self.split = split
+    self.raw_instances = raw_instances
 
 
 
@@ -55,7 +56,7 @@ class MILDataset(Dataset):
     return Task.MIL
 
   def load(self) -> List[MILExample]:
-    instances = load_mil(self.split)
+    instances = load_mil(self.split,self.raw_instances)
     
     return instances
 
@@ -65,22 +66,23 @@ def _intern(x):
     return None
   return sys.intern(x)
 
-def generate_id():
-  while LAST_ID in ID_LIST:
-    LAST_ID += 1
-  ID_LIST.add(LAST_ID)
-  return LAST_ID 
 
-def load_mil(split):
+
+def load_mil(split=None,raw_instances=None):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
   #file = file_paths.IMAGECONTRAST_DIR+'/train_large_2.json'
   #file = '/data/michal5/gpv/text_contrast/train_large.json'
-  if split == 'small':
+  if raw_instances == None:
+    if split == 'small':
+      file = '/data/michal5/gpv/lessons/mil_small.json'
+    else:
+      file = '/data/michal5/gpv/lessons/mil_train.json'
+    #file = '/data/michal5/gpv/lessons/mil_small.json'
     file = '/data/michal5/gpv/lessons/mil_small.json'
+    logging.info(f"Loading mil data from {file}")
+    raw_instances = load_json_object(file)
   else:
-    file = '/data/michal5/gpv/lessons/mil_train.json'
-  logging.info(f"Loading mil data from {file}")
-  raw_instances = load_json_object(file)
+    raw_instances =raw_instances
   out = []
   for i, x in enumerate(raw_instances):
 

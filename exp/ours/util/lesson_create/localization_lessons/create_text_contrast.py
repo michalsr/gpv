@@ -20,7 +20,7 @@ UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse',
 #     query of locate class
 #     answer is str of randomly chosen position for target image 
 IMAGES_PER_COCO_CONCEPT = 1
-GROUP_SIZE = 11
+GROUP_SIZE = 10
 
 
 web_cat_to_image_id = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/category_to_image_id.json')

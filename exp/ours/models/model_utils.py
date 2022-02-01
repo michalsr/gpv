@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from torch.jit import Error
 from transformers import PreTrainedTokenizer, T5Tokenizer
-
+import pdb 
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import Task
 from exp.ours.image_featurizer.image_featurizer import ImageCollater
@@ -66,62 +66,74 @@ class CollateWithTokenizer(Callable):
     answers = []
     indicies = []
     mil_answers = []
-    print('hello')
+    new_batch = []
+    for b in batch:
+      if type(b) == list:
+        for element in b:
+          new_batch.append(element)
+      else:
+        new_batch.append(b)
+    batch = new_batch
+    #print(batch,'batch')
+    #print('hello')
     #print(type(batch[0]),'batch type')
-    if type(batch[0]) == list:
+    # if type(batch[0]) == list:
+    #   #pdb.set_trace()
+    #   #print(batch[0],'batc 0')
 
-      #print(batch[0],'batc 0')
-    
-      #print(batch[0],'batch')
-      new_batch = py_utils.flatten_list(batch)
+    #   #print(batch[0],'batch')
 
-      # if batch[0][0].task == (Task.IMAGECONTRAST or Task.TEXTCONTRAST or Task.SYNONYM):
-      #   new_batch = [item for sublist in batch for item in sublist]
+    #   new_batch = py_utils.flatten_list(batch)
+
+    #   # if batch[0][0].task == (Task.IMAGECONTRAST or Task.TEXTCONTRAST or Task.SYNONYM):
+    #   #   new_batch = [item for sublist in batch nfor item in sublist]
    
-      # if batch[0][0].task == Task.SYNONYM:
+    #   # if batch[0][0].task == Task.SYNONYM:
       
-      #   for i in range(len(batch)):
-      #     new_batch.append(batch[i][0])
-      #     new_batch.append(batch[i][1])
-      #     print(new_batch[-1].image_id,'1')
-      #     print(new_batch[-2].image_id,'2')
-      batch = new_batch
+    #   #   for i in range(len(batch)):
+    #   #     new_batch.append(batch[i][0])
+    #   #     new_batch.append(batch[i][1])
+    #   #     print(new_batch[-1].image_id,'1')
+    #   #     print(new_batch[-2].image_id,'2')
+    #   batch = new_batch
+
      
-      if batch[0].task == Task.IMAGECONTRAST or batch[0].task == Task.TEXTCONTRAST:
-        idx = batch[0].index_of_class
-        idxes = [int(x.index_of_class) for x in batch]
-        for y in batch:
-          if int(y.index_of_class) != int(idx):
-            print(idxes,'idxes')
-            raise ValueError
-        print('Images check out')
-      if batch[0].task == (Task.SYNONYM):
-        #image id should be the same for every pair 
-        for i in range(0,len(batch),2):
-          if str(batch[i].image_id) != str(batch[i+1].image_id):
-            print(batch[i].image_id,batch[i+1].image_id)
-            raise ValueError 
-        # print(int(idx)==int(batch[1].index_of_class))
-        # if not all(idxes) == int(idx):
-        #   print(idxes)
-        #   raise Error
+    #   # if batch[0].task == Task.IMAGECONTRAST or batch[0].task == Task.TEXTCONTRAST:
+    #   #   idx = batch[0].index_of_class
+    #   #   idxes = [int(x.index_of_class) for x in batch]
+    #   #   for y in batch:
+    #   #     if int(y.index_of_class) != int(idx):
+    #   #       print(idxes,'idxes')
+    #   #       raise ValueError
+    #   #   print('Images check out')
+    #   # if batch[0].task == (Task.SYNONYM):
+    #   #   #image id should be the same for every pair 
+    #   #   for i in range(0,len(batch),2):
+    #   #     if str(batch[i].image_id) != str(batch[i+1].image_id):
+    #   #       print(batch[i].image_id,batch[i+1].image_id)
+    #   #       raise ValueError 
+    #     # print(int(idx)==int(batch[1].index_of_class))
+    #     # if not all(idxes) == int(idx):
+    #     #   print(idxes)
+    #     #   raise Error
      
-      # for i,b in enumerate(new_batch):
-      #   print(i,b.index_of_class,'index of class')
-    # for i,ex in enumerate(batch):
-    #   if i!= len(batch)-2:
-    #     print(batch[i].image_id,batch[i+1].image_id)
-    #     if str(batch[i].image_id) != str(batch[i+1].image_id):
-    #       print('BAD')
-    #       break
-    # for i in range(len(batch)):
-    #   if i<len(batch)-3:
-    #     print(batch[i].image_id,'1 again')
-    #     print(batch[i+1].image_id,'2 again')
-    #print(batch[0].task,'batch task')
-    print(len(batch),'batch size')
+    #   # for i,b in enumerate(new_batch):
+    #   #   print(i,b.index_of_class,'index of class')
+    # # for i,ex in enumerate(batch):
+    # #   if i!= len(batch)-2:
+    # #     print(batch[i].image_id,batch[i+1].image_id)
+    # #     if str(batch[i].image_id) != str(batch[i+1].image_id):
+    # #       print('BAD')
+    # #       break
+    # # for i in range(len(batch)):
+    # #   if i<len(batch)-3:
+    # #     print(batch[i].image_id,'1 again')
+    # #     print(batch[i+1].image_id,'2 again')
+    # #print(batch[0].task,'batch task')
+    # #print(len(batch),'batch size')
+    
     for ex in batch:
-      
+
 
       
       # print(ex.image_id,'image id')
@@ -132,7 +144,8 @@ class CollateWithTokenizer(Callable):
       #print('Appended indicies')
       indicies.append(ex.index_of_class)
       q = ex.query[np.random.randint(0, len(ex.query))]
-  
+      #print(ex.target_answer == None,'target answer')
+      #print(ex.target_answer,'taget answer')
       if ex.target_answer is None or len(ex.target_answer) == 0:
         # This is a bit messy since it conflates no output text requested (therefore, a
         # detection examples) with an unlabelled example (predicting a caption with no known label),
@@ -184,7 +197,7 @@ class CollateWithTokenizer(Callable):
     )
     #print('Gathered labels')
     #print(labels.index_of_class,'index of class collate')
-    #pprint(labels,'labels')
+    #print(labels,'labels')
     out = dict(
       input_ids=queries["input_ids"],
       input_mask=queries["attention_mask"],
@@ -194,4 +207,5 @@ class CollateWithTokenizer(Callable):
 
     if self.other_collate:
       out.update(self.other_collate.collate(batch, out))
+    #print(out,'out')
     return out

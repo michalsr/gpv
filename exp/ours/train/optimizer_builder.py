@@ -100,8 +100,7 @@ class DelayedWarmupSchedule:
         if "decay" in group and group["decay"] is None:
           factor = 1.0
         else:
-          print(self.total)
-          print(wu)
+       
           factor = (self.total - group_step) / (self.total - wu)
         min_lr = group.get("min_lr", 0)
         if min_lr:

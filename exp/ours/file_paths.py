@@ -33,9 +33,11 @@ PRETRAINED_DETR_MODELS = {
 }
 
 OPENSCE_HOME = join(DATA_DIR, "git/opensce")
+#OPENSCE_HOME = '/shared/rsaas/michal5/gpv_michal/opensce_synonyms.json'
 OPENSCE_SAMPLES = join(OPENSCE_HOME, "samples_w_prompts")
 OPENSCE_IMAGES = join(OPENSCE_HOME, "images")
-OPENSCE_SYN = join(OPENSCE_HOME, "opensce_synonyms.json")
+#OPENSCE_SYN = join(OPENSCE_HOME, "opensce_synonyms.json")
+OPENSCE_SYN = '/shared/rsaas/michal5/gpv_michal/opensce_synonyms.json'
 OPENSCE_CATS = join(OPENSCE_HOME, "opensce_categories.csv")
 
 SOURCE_DIR = join(GPV_DIR, "learning_phase_data")

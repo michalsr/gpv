@@ -42,12 +42,12 @@ class SynonymExample:
 @Dataset.register("synonym")
 class SynonymDataset(Dataset):
 
-  def __init__(self, split: str,):
-    if split not in {"test", "val", "train"}:
-      raise ValueError(split)
+  def __init__(self, split: str,raw_instances=None):
+    
     
 
     self.split = split
+    self.raw_instances = raw_instances
 
 
 
@@ -55,7 +55,7 @@ class SynonymDataset(Dataset):
     return Task.SYNONYM
 
   def load(self) -> List[SynonymExample]:
-    instances = load_synonym(self.split)
+    instances = load_synonym(self.split,self.raw_instances)
     
     return instances
 
@@ -67,11 +67,13 @@ def _intern(x):
 
 
 
-def load_synonym(split):
-
-  file = '/data/michal5/gpv/lessons/synonym_train_super_rel.json'
-  logging.info(f"Loading synonym data from {file}")
-  raw_instances = load_json_object(file)
+def load_synonym(split=None,raw_instances=None):
+  if raw_instances == None:
+    file = '/data/michal5/gpv/lessons/synonym_train_super_rel.json'
+    logging.info(f"Loading synonym data from {file}")
+    raw_instances = load_json_object(file)
+  else:
+    raw_instances = raw_instances
   out = []
   for i, ex in enumerate(raw_instances):
   

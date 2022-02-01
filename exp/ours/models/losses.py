@@ -234,58 +234,59 @@ class BasicGPVLoss(GPVLoss):
       if p[0] < min_val:
         min_val = p[0]
     return min_val 
-  def image_contrastive_loss(self,logits,batch_labels):
+  def image_contrastive_loss(self,logits,index_of_class):
 
     final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
-    target_index = int(batch_labels.index_of_class[0])
-    for idx in batch_labels.index_of_class:
-      if int(idx) != target_index:
-        raise ERROR
+    target_index = int(index_of_class)
+    # for idx in batch_labels.index_of_class:
+    #   if int(idx) != target_index:
+    #     raise ERROR
     if not os.path.exists('exp/ours/target_index.json'):
       io.dump_json_object(target_index,'exp/ours/target_index.json')
     #losses =torch.zeros(16)
-    targets = torch.zeros(len(batch_labels.index_of_class))
+    targets = torch.zeros(final_logits.size()[0])
     targets[target_index] = 1
     targets.to("cuda:0")
     loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),targets.cuda()).cuda()
     #loss = F.nll_loss(filtered_logits.cuda(),targets.type(torch.LongTensor).cuda()).cuda()
     return loss
-  def text_contrastive_loss(self,logits,batch_labels):
-
+  def text_contrastive_loss(self,logits,index_of_class):
+    print(logits.size())
     final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
-    target_index = int(batch_labels.index_of_class[0])
-    for idx in batch_labels.index_of_class:
-      if int(idx) != target_index:
-        raise ERROR
+    target_index = int(index_of_class)
+    # for idx in batch_labels.index_of_class:
+    #   if int(idx) != target_index:
+    #     raise ERROR
     if not os.path.exists('exp/ours/target_index.json'):
       io.dump_json_object(target_index,'exp/ours/target_index.json')
     #losses =torch.zeros(16)
-    targets = torch.zeros(len(batch_labels.index_of_class))
+    targets = torch.zeros(final_logits.size()[0])
     targets[target_index] = 1
     targets.to("cuda:0")
     loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),targets.cuda()).cuda()
     #loss = F.nll_loss(filtered_logits.cuda(),targets.type(torch.LongTensor).cuda()).cuda()
     return loss
   def mil(self,logits,batch_labels):
-      print(logits,'logits')
-      print(logits.size())
-      print(batch_labels,'batch labels')
-      print(logits[:,:,0].size())
-      print(logits[:,:,0].sort(),'sort')
+      # print(logits,'logits')
+      # print(logits.size())
+      # print(batch_labels,'batch labels')
+      # print(logits[:,:,0].size())
+      # print(logits[:,:,0].sort(),'sort')
       max_logits,idx = torch.max(logits[:,:,0],dim=(1))
-      print(idx,'idx')
+      #print(max_logits,'max logits')
+      #print(idx,'idx')
       final_logits = torch.cuda.FloatTensor(max_logits).to("cuda:0")
       #final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
-      print(final_logits,'logits')
+      #print(final_logits,'logits')
       loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),torch.FloatTensor(batch_labels).cuda()).cuda()
-      print(loss,'loss')
+      #print(loss,'loss')
       return loss 
   def syn_loss(self,logits_1,logits_2):
       #Size is Bxnum_boxesxrelevance scores
       
       logits_1 = logits_1[:,:,0]
       logits_2 = logits_2[:,:,0]
-      print(logits_2.size(),'logits')
+      #print(logits_2.size(),'logits')
       max_logits,ind = torch.max(logits_2,dim=(1))
       values = torch.zeros(logits_2.size())
       #print(values.size())
@@ -308,12 +309,15 @@ class BasicGPVLoss(GPVLoss):
     task_to_ix = collections.defaultdict(list)
     for i, task in enumerate(batch_labels.tasks):
       task_to_ix[task].append(i)
+    print(task_to_ix,'task')
     labels = batch_labels.text_labels
 
     losses = {}
     total_loss = 0
+    
     for task, ix_lst in task_to_ix.items() :
-      print(task==Task.TEXTCONTRAST,'task')
+      #print(task==Task.TEXTCONTRAST,'task')
+      
       #pdb.set_trace()
       ixs = torch.as_tensor(ix_lst, device=labels.device, dtype=torch.long)
       n_boxes = prediction.n_boxes
@@ -325,7 +329,7 @@ class BasicGPVLoss(GPVLoss):
         losses.update(log)
         task_loss = total
       elif task == Task.SYNONYM:
-        print(prediction.pred_rel.size(),'size')
+        #print(prediction.pred_rel.size(),'size')
         ix_1 = torch.as_tensor([j for j in ix_lst if j%2 ==0],device=labels.device,dtype=torch.long)
         ix_2 = torch.as_tensor([j for j in ix_lst if j%2 ==1],device=labels.device,dtype=torch.long)
         loss = self.syn_loss(prediction.pred_rel[ix_1],prediction.pred_rel[ix_2])
@@ -336,12 +340,29 @@ class BasicGPVLoss(GPVLoss):
         losses[str(task) + "-loss"] = loss 
         task_loss = loss
       elif task == Task.IMAGECONTRAST:
+        total_loss = torch.zeros(1).cuda()
+        diff_indicies = {}
+        for ind in ixs:
+          if batch_labels.index_of_class[ind] != None:
+            if batch_labels.index_of_class[ind] not in diff_indicies:
+              diff_indicies[batch_labels.index_of_class[ind]] = []
+            diff_indicies[batch_labels.index_of_class[ind]].append(ind.item())
+        #print(prediction.pred_rel.size(),diff_indicies)
+        for k in diff_indicies:
+          loss = self.image_contrastive_loss(prediction.pred_rel[diff_indicies[k],:,:],k)
+          total_loss = torch.add(total_loss,loss)
         #print(prediction.pred_rel[ixs],'relative predition')\
-        print('using this')
-        print(batch_labels,'batch labels')
-        loss = self.image_contrastive_loss(prediction.pred_rel[ixs],batch_labels)
-        losses[str(task) + "-loss"] = loss
-        task_loss = loss
+        # get_labels = []
+        # for l in batch_labels.index_of_class:
+        #   if l != None:
+        #     get_labels.append(l)
+        # #print('using this')
+        # print(ixs,'ixs')
+        # print(prediction.pred_rel[ixs].size())
+        # print(batch_labels.index_of_class,'index of class')
+        # loss = self.image_contrastive_loss(prediction.pred_rel[ixs],get_labels)
+        losses[str(task) + "-loss"] = total_loss
+        task_loss = total_loss
         #print(task_loss,'task loss')
         # total, log = self.localization(
         #   prediction.pred_boxes[ixs], prediction.pred_rel[ixs],
@@ -350,17 +371,37 @@ class BasicGPVLoss(GPVLoss):
         # losses.update(log)
         # task_loss = total
       elif task == Task.TEXTCONTRAST:
-        print('using this')
-        print(batch_labels,'batch labels')
-        loss = self.text_contrastive_loss(prediction.pred_rel[ixs],batch_labels)
-        losses[str(task) + "-loss"] = loss
-        task_loss = loss
+        
+        total_loss = torch.zeros(1).cuda()
+        diff_indicies = {}
+        for ind in ixs:
+          if batch_labels.index_of_class[ind] != None:
+            if batch_labels.index_of_class[ind] not in diff_indicies:
+              diff_indicies[batch_labels.index_of_class[ind]] = []
+            diff_indicies[batch_labels.index_of_class[ind]].append(ind.item())
+        print(prediction.pred_rel.size(),diff_indicies)
+        for k in diff_indicies:
+          loss = self.image_contrastive_loss(prediction.pred_rel[diff_indicies[k],:,:],k)
+          total_loss = torch.add(total_loss,loss)
+        #print(prediction.pred_rel[ixs],'relative predition')\
+        # get_labels = []
+        # for l in batch_labels.index_of_class:
+        #   if l != None:
+        #     get_labels.append(l)
+        # #print('using this')
+        # print(ixs,'ixs')
+        # print(prediction.pred_rel[ixs].size())
+        # print(batch_labels.index_of_class,'index of class')
+        # loss = self.image_contrastive_loss(prediction.pred_rel[ixs],get_labels)
+        losses[str(task) + "-loss"] = total_loss
+        task_loss = total_loss
       elif task == Task.SEGMENTATION:
         segmentation_labels = [batch_labels.segmentation_labels[i] for i in ix_lst]
         raise NotImplementedError()
       else:
         task_labels = labels[ixs]
         task_logits = prediction.logits[ixs]
+        #print(task_logits.size(),'task logit size')
         if self.sum_seq_tokens:
           task_loss = F.cross_entropy(
             task_logits.view(-1, task_logits.size(-1)), task_labels.view(-1), reduction='sum')

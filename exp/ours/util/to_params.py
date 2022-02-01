@@ -89,7 +89,7 @@ def to_params_any(obj, annotation):
 
   # Base cases, no need to worry about annotations
   # note we allow incorrect typing here because I don't think it matters when loading the class
-  if obj_type in {str, int, float, bool, np.integer, np.floating, np.ndarray, np.bool}:
+  if obj_type in {str, int, float, bool, np.integer, np.floating, np.ndarray, np.bool,np.array,np.str_}:
     return obj
 
   # Collections, if there are type annotations, try to preserve them, since we will need
@@ -161,6 +161,7 @@ def to_params(obj: FromParams, source_cls) -> Dict[str, Any]:
       param_names = [p for p in init_signature.parameters.keys() if p != "self"]
       args = {}
       for name in param_names:
+       
         if not hasattr(obj, name):
           raise ValueError(cls.__name__ + " did not store parameter " + name)
         val = getattr(obj, name)

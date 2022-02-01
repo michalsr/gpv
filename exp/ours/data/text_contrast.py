@@ -31,7 +31,7 @@ class TextContrastExample:
   answer: str
   query: str 
   contrast_group: str
-  is_in_category: bool 
+
   rel_query: str
 
 
@@ -47,12 +47,12 @@ class TextContrastExample:
 @Dataset.register("text-contrast")
 class TextContrastDataset(Dataset):
 
-  def __init__(self, split: str,):
-    if split not in {"test", "val", "train"}:
-      raise ValueError(split)
+  def __init__(self, split: str,raw_instances=None):
+ 
     
 
     self.split = split
+    self.raw_instances = raw_instances
 
 
 
@@ -60,7 +60,7 @@ class TextContrastDataset(Dataset):
     return Task.TEXTCONTRAST
 
   def load(self) -> List[TextContrastExample]:
-    instances = load_text_contrast(self.split)
+    instances = load_text_contrast(self.split,self.raw_instances)
     
     return instances
 
@@ -76,14 +76,17 @@ def generate_id():
   ID_LIST.add(LAST_ID)
   return LAST_ID 
 
-def load_text_contrast(split):
+def load_text_contrast(split=None,raw_instances=None):
   #file = join(file_paths.WEBQA_DIR, split + "_image_info.json")
   #file = file_paths.IMAGECONTRAST_DIR+'/train_large_2.json'
   #file = '/data/michal5/gpv/text_contrast/train_large.json'
   #file = '/data/michal5/gpv/lessons/text_contrast_train_10_per_group.json'
-  file = '/data/michal5/gpv/lessons/text_contrast_train_15_per_group.json'
-  logging.info(f"Loading text contrast data from {file}")
-  raw_instances = load_json_object(file)
+  if raw_instances == None:
+    file = '/data/michal5/gpv/lessons/text_contrast_train_15_per_group.json'
+    logging.info(f"Loading text contrast data from {file}")
+    raw_instances = load_json_object(file)
+  else:
+    raw_instances = raw_instances 
   out = []
   for i, x in enumerate(raw_instances):
 
@@ -94,7 +97,7 @@ def load_text_contrast(split):
       image_id = x["image"]
 
     ex = TextContrastExample(gpv_id=x['gpv_id'],image_id=image_id,answer=x['answer'],
-    query=x['query'],contrast_group=x['contrast_group'],is_in_category=x['is_in_category'],rel_query=x['rel_query']
+    query=x['query'],contrast_group=x['contrast_group'],rel_query=x['rel_query']
       )
     out.append(ex)
     

@@ -19,7 +19,7 @@ SEEN = ['dog']
 #     query of locate class
 #     answer is str of randomly chosen position for target image 
 IMAGES_PER_COCO_CONCEPT = 1
-GROUP_SIZE = 16
+GROUP_SIZE = 10
 
 
 web_cat_to_image_id = io.load_json_object('/shared/rsaas/michal5/gpv_michal/web_training_info/category_to_image_id.json')
@@ -109,8 +109,8 @@ def main():
                         image_contrast_data.append(entry)
                     contrast_group += 1
     print(len(image_contrast_data),'length of image contrast data')
-    io.dump_json_object(image_contrast_data,'/data/michal5/gpv/lessons/image_contrast_3.json')
-    io.dump_json_object(image_contrast_data,'/shared/rsaas/michal5/gpv_michal/lessons/image_contrast_3.json')
+    io.dump_json_object(image_contrast_data,'/data/michal5/gpv/lessons/image_contrast_10.json')
+    io.dump_json_object(image_contrast_data,'/shared/rsaas/michal5/gpv_michal/lessons/image_contrast_10.json')
     
 
 

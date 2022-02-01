@@ -19,6 +19,10 @@ class Task(FromParams, enum.Enum):
   TEXTCONTRAST = "textcontrast" #lesson
   MIL = "mil" #lesson 
   SYNONYM = "synonym" #lesson
+  VQACLSOBJ = "vqa_cls_obj" #lesson
+  ACTWOBJ = "act_w_obj" #lesson
+  ADJWOBJ = "adj_w_obj" #lesson
+  ACTNOBJ = "act_no_obj"
 
 
   @classmethod

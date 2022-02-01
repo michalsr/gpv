@@ -46,7 +46,7 @@ class CollateLocalizationLabels:
         per_box_labels.append(ex.relevance_query)
       else:
         per_box_labels.append(self.tokenizer.pad_token)
-    print(per_box_labels,len(per_box_labels),'per box labels')
+    #print(per_box_labels,len(per_box_labels),'per box labels')
     labels = self.tokenizer(
       per_box_labels, return_tensors='pt', padding=True, truncation=True)
     return dict(relevance_queries=labels["input_ids"].view(len(batch), -1))
@@ -589,6 +589,7 @@ class T5GpvPerBox(GPVModel):
     boxes = image_features.boxes
     n_boxes = image_features.n_boxes
     #print(rel.size(),'relevance size')
+    #print(len(t5_out.logits),'t5 logits')
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
     #print('Computed batch pred')
     #print(rel,'batch pred')

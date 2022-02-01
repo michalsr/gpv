@@ -388,13 +388,13 @@ def main():
 
   if args.output_dir and args.output_name:
     raise ValueError("Cannot specify output_name and output_dir")
-  model_to_eval = 'outputs/seen_60_only_gpv_per_box'
+  model_to_eval = 'outputs/auto_select_epoch_4_mil_only'
   models = our_utils.find_models(model_to_eval)
   print(models)
   # if len(models) == 0:
   #   logging.info("No models selected")
   #   return
-  run_dir = 'outputs/image_contrast_old_model'
+  run_dir = 'outputs/mil'
   devices = our_utils.get_devices(args.device)
   # if args.output_dir:
   #   models = py_utils.flatten_list(x[1] for x in models.values())

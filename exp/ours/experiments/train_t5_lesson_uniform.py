@@ -115,24 +115,20 @@ class Weights(nn.Module):
       #self.weights.fill_(1/num_lessons)
       self.params = [self.weights] 
       self.optimizer = torch.optim.Adam(self.params,lr=0.05,betas=(0.5,0.999))
-      self.sigmoid = nn.Sigmoid()
+      self.softmax = nn.Softmax(dim=None)
       self.batch_size = batch_size 
       self.log_prob = []
-  def sample(self,trajec,num_lessons):
+  def sample(self,trajec):
     lessons = []
-    sample_log_probs = torch.zeros(1)
+    log_probs = []
 
-    p = self.sigmoid(self.weights)
+    p = self.softmax(self.weights)
     dist = torch.distributions.categorical.Categorical(probs=p)
-
-    for i in range(num_lessons):
-    
+    for i in range(int(4000/self.batch_size)):
       lesson = dist.sample()
       lessons.append(lesson.item())
-      sample_log_probs = torch.add(sample_log_probs,dist.log_prob(lesson))
-      #sample_log_probs+= dist.log_prob(lesson)
-
-    self.log_prob.append(sample_log_probs)
+      log_probs.append(dist.log_prob(lesson))
+    self.log_prob.append(torch.sum(torch.tensor(log_probs)))
     #print(self.log_prob,'after sampl')
     #print(trajec,len(self.log_prob))
     assert len(self.log_prob) == trajec + 1
@@ -141,12 +137,11 @@ class Weights(nn.Module):
     #print(self.log_prob,'log prob')
     return lessons  
   def forward(self):
-    return self.sigmoid(self.weights)
+    return self.softmax(self.weights)
   def update(self,normalized_reward):
     tensor_reward = []
     loss_values = []
-    # #pdb.set_trace()
-    # pdb.set_trace()
+    #pdb.set_trace()
     for r in normalized_reward:
       value = r.split('_')
       #print(value[1])
@@ -214,32 +209,25 @@ class AutoTask(FromParams):
   summary_writer: Optional[SummaryWriter] = None
   start_epoch = 0
   start_trajec = 0
-  best_trajec_score = 0
+  best_trajec_score = .4967
   output_dir = None
-  batch_size = 8
-  combine_lesson = False
-  temp_best_model_path = None 
-  temp_best_trajec_score = None 
-  trainer_step = None 
+  batch_size = 200
  
 
-  lesson_datasets = {'image_contrast':TrainerDataset(ImageContrastDataset('train'),"img-contrast"),"mil":TrainerDataset(MILDataset('train'),'mil'),
-    'synonym':TrainerDataset(SynonymDataset("train"),"synonym-train")}
+  lesson_datasets = {'image_contrast':TrainerDataset(ImageContrastDataset('train'),"img-contrast"), "text_contrast":TrainerDataset(TextContrastDataset("train"),"text-contrast"),"mil":TrainerDataset(MILDataset('train'),'mil'),
+    'synonym':TrainerDataset(SynonymDataset("train"),"synonym-train"),"mil_2":TrainerDataset(MILDataset('train'),'mil')}
   def reset(self):
       #reset trainer and model 
       model, trainer = get_model_and_trainer(self.args)
       self.gpv_model = model 
       self.trainer = trainer
   def save(self):
-     auto_save_dict = {'train_tasks':self.train_tasks,'args':self.args,'lessons':self.lessons,
-     'num_trajec':self.num_trajec,'current_lesson_trajec':self.current_lesson_trajec,'map_int_to_lesson':self.map_int_to_lesson,'map_lesson_to_int':self.map_lesson_to_int,
-     'best_model_path':self.best_model_path,'trajec_to_validation_scores':self.trajec_to_validation_scores,'trajec_to_normalized_scores':self.trajec_to_normalized_scores,
-     'trajec_to_output_dir':self.trajec_to_output_dir,'epochs':self.epochs,'outer_log_step':self.outer_log_step,'inner_log_step':self.inner_log_step,
-     'start_epoch':self.start_epoch,'start_trajec':self.start_trajec,'best_trajec_score':self.best_trajec_score,'output_dir':self.output_dir,'batch_size':self.batch_size,'temp_best_model_path':self.temp_best_model_path}
+     auto_save_dict = {'args':self.args,'lessons':self.sampled_lesson,'map_int_to_lesson':self.map_int_to_lesson,'map_lesson_to_int':self.map_lesson_to_int,
+     'best_model_path':self.best_model_path,'epochs':self.epochs,'start_epoch':self.start_epoch,'output_dir':self.output_dir,'batch_size':self.batch_size}
      torch.save(auto_save_dict,self.output_dir+'/auto_task_chkpt.pt')
      Params(to_params(self.gpv_model, GPVModel)).to_file(join(self.output_dir+'/', "model.json"))
-     save_dict = {'weights':self.policy_network.state_dict(),'optim':self.policy_network.optimizer.state_dict(),'log_prob':self.policy_network.log_prob}
-     torch.save(save_dict,self.output_dir+'/policy_chkpt.pt')
+    #  save_dict = {'weights':self.policy_network.state_dict(),'optim':self.policy_network.optimizer.state_dict(),'log_prob':self.policy_network.log_prob}
+    #  torch.save(save_dict,self.output_dir+'/policy_chkpt.pt')
 
 
   def initialize(self):
@@ -257,13 +245,8 @@ class AutoTask(FromParams):
       self.map_lesson_to_int[l] = i
     self.inner_log_step = 0
     self.outer_log_step = 0
-  def adjust_trainer(self,new_output_dir,init_from,data,epoch):
-    training_datasets = create_training_datasets(data,self.sampled_lesson,self.batch_size,self.map_int_to_lesson,self.lesson_datasets,combine_same_lesson=False)
-    self.trainer.actual_epoch = epoch
-    self.trainer.epoch_scheduler = True 
-    self.trainer.step_schedule = None
-    self.trainer.combine_lessons = self.combine_lesson
-    self.trainer.combine_lesson_2 = self.combine_lesson_2
+  def adjust_trainer(self,new_output_dir,init_from,data):
+    training_datasets = create_training_datasets(data,self.sampled_lesson,self.batch_size,self.map_int_to_lesson,self.lesson_datasets)
     self.trainer.train_datasets = []
     self.trainer.eval_datasets = []
     self.trainer.train_datasets = training_datasets
@@ -283,9 +266,6 @@ class AutoTask(FromParams):
     self.trainer.epochs = 1
     self.trainer.output_dir = new_output_dir
     self.gpv_model.initialize_from = init_from
-    if self.best_model_path != None:
-      self.trainer.train_state_file = self.best_model_path + 'r0/checkpoint.pth' 
-      self.trainer.old_model = self.best_model_path + 'model.json'
     self.trainer.upper_bound_no_change = 100 
     self.trainer.num_no_change_val = 0
     self.auto_logger.info("Modified trainer for next lesson")
@@ -323,75 +303,83 @@ class AutoTask(FromParams):
     print(self.start_epoch,'start epoch')
     
     for e in range(self.start_epoch,self.epochs):
-      if e>0:
-        self.auto_logger.info('weight at beginning of epoch')
-        for l,p in enumerate(self.policy_network.weights.tolist()):
-          self.auto_logger.info(f'{p} is weight for {self.map_int_to_lesson[l]}')
-        
-
+      # self.auto_logger.info('weight at beginning of epoch')
+      # for p in self.policy_network.weights.tolist():
+      #   self.auto_logger.info(p)
       #self.auto_logger.info(self.policy_network.weights.tolist(),'policy network weights at beginning of epoch')
       if e ==0:
         self.initialize()
-        self.auto_logger.info("Initialization complete")
+        #self.auto_logger.info("Initialization complete")
         self.save()
       self.auto_logger.info(f'Epoch:{e}')
-      data = io.load_json_object('/shared/rsaas/michal5/gpv_michal/lessons/full_localization_data_3.json')
-      total_data = len(data)
+      data = io.load_json_object('/shared/rsaas/michal5/gpv_michal/full_localization_data.json')
       random.shuffle(data)
-      for j in range(self.start_trajec,self.num_trajec):
+      self.sampled_lesson = self.policy_network.sample(e)
+      new_output_dir = f'{self.output_dir}/epoch_{e}/'
+      if e == 0:
+        init_from = '/shared/rsaas/michal5/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
+      else:
+        self.best_model_path+'r0/best-state.pth'
       
-        self.auto_logger.info(f'Trajectory:{j}')
-        #compute 
-        if j == 0:
-         
-            self.current_lesson_trajec = []
-            self.trajec_to_output_dir = {}
-            self.trajec_to_validation_scores = {}
-            self.trajec_to_normalized_scores = {}
-            self.log_prob = {}
-          #sample 
-        self.sampled_lesson = self.policy_network.sample(j,int(total_data/self.batch_size))
-        
-        for i in self.sampled_lesson:
-        #   self.auto_logger.info(f"Sampled lesson {self.map_int_to_lesson[i]} ")
-
-          self.current_lesson_trajec.append(self.map_int_to_lesson[self.sampled_lesson[i]])
-          #adjust trainer
-        new_output_dir = f'{self.output_dir}/epoch_{e}_lesson_{j}/'
-        self.trajec_to_output_dir[f'trajec_{j}'] = new_output_dir
-        if e == 0 or self.best_model_path == None:
-          init_from = '/shared/rsaas/michal5/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
-        else:
-          init_from = self.best_model_path+'r0/best-state.pth'
-        self.adjust_trainer(new_output_dir,init_from,data,e)
-        print(self.gpv_model.initialize_from,'initialize from')
-        run_trainer_from_args(self.trainer,self.gpv_model,self.args,new_output_dir)
-        trajec_score = io.load_json_object(new_output_dir+'r0/val_score.json')
-        #trajec_score = {'val':0.5}
-        self.auto_logger.info(f"Trajectory {j} has reward {trajec_score['val']}")
-  
-        self.trajec_to_validation_scores[f'trajec_{j}'] = float(trajec_score['val'])
-        if float(trajec_score['val']) > self.best_trajec_score:
-          self.auto_logger.info(f"Best trajec score updated to {trajec_score['val']}")
-          self.best_trajec_score = float(trajec_score['val'])
-          self.temp_best_model_path = self.trajec_to_output_dir[f'trajec_{j}'] 
-        self.log_inner(j)
-        self.start_trajec += 1
-        self.save()
-        #self.reset()
-      self.start_trajec = 0
-      self.best_model_path = self.temp_best_model_path
-      self.best_trajec_score = 0
-     
-      self.compute_normalized_validation()
-      #print(self.trajec_to_normalized_scores,'normalized')
-      loss_value = self.policy_network.update(self.trajec_to_normalized_scores)
-      self.summary_writer.add_scalar('avg_loss',loss_value,e)
-      self.log_outer(e)
-      self.auto_logger.info("Updated lesson distribution")
-      
+      self.adjust_trainer(new_output_dir,init_from,data)
+      run_trainer_from_args(self.trainer,self.gpv_model,self.args,new_output_dir)
+      trajec_score = io.load_json_object(new_output_dir+'/r0/val_score.json')
+      self.auto_logger.info(f"Epoch score is {trajec_score['val']}")
+      self.best_model_path = f'{self.output_dir}/epoch_{e}/'
       self.start_epoch += 1
       self.save()
+      # for j in range(self.start_trajec,self.num_trajec):
+      
+      #   self.auto_logger.info(f'Trajectory:{j}')
+      #   #compute 
+      #   if j == 0:
+         
+      #       self.current_lesson_trajec = []
+      #       self.trajec_to_output_dir = {}
+      #       self.trajec_to_validation_scores = {}
+      #       self.trajec_to_normalized_scores = {}
+      #       self.log_prob = {}
+      #     #sample 
+      #   self.sampled_lesson = self.policy_network.sample(j)
+        
+      #   for i in self.sampled_lesson:
+      #     self.auto_logger.info(f"Sampled lesson {self.map_int_to_lesson[self.sampled_lesson[i]]} ")
+
+      #     self.current_lesson_trajec.append(self.map_int_to_lesson[self.sampled_lesson[i]])
+      #     #adjust trainer
+      #   new_output_dir = f'{self.output_dir}/epoch_{e}/'
+      #   self.trajec_to_output_dir[f'trajec_{j}'] = new_output_dir
+      #   if e == 0 or self.best_model_path == None:
+      #     init_from = '/shared/rsaas/michal5/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
+      #   else:
+      #     init_from = self.best_model_path+'r0/best-state.pth'
+      #   self.adjust_trainer(new_output_dir,init_from,data)
+      
+      #   run_trainer_from_args(self.trainer,self.gpv_model,self.args,new_output_dir)
+      #   trajec_score = io.load_json_object(new_output_dir+'/r0/val_score.json')
+      #   #trajec_score = {'val':0.5}
+      #   self.auto_logger.info(f"Best trajec score updated to {trajec_score['val']}")
+      #   self.best_trajec_score = float(trajec_score['val'])
+      #   self.best_model_path = self.trajec_to_output_dir[f'trajec_{j}'] 
+  
+     
+      #   if float(trajec_score['val']) > self.best_trajec_score:
+  
+      #   self.log_inner(j)
+      #   self.start_trajec += 1
+      #   self.save()
+      #   #self.reset()
+      # self.start_trajec = 0
+     
+      # self.compute_normalized_validation()
+      # #print(self.trajec_to_normalized_scores,'normalized')
+      # loss_value = self.policy_network.update(self.trajec_to_normalized_scores)
+      # self.summary_writer.add_scalar('avg_loss',loss_value,e)
+      # self.log_outer(e)
+      # self.auto_logger.info("Updated lesson distribution")
+      
+      # self.start_epoch += 1
+      #self.save()
   
      
 
@@ -419,8 +407,6 @@ def main():
   parser.add_argument("--synonym",type=str,default=None)
   parser.add_argument("--resume",type=str,default=None)
   parser.add_argument("--auto_task_output_dir",type=str,default=None)
-  parser.add_argument("--combine_lesson",type=bool,default=None)
-  parser.add_argument("--combine_lesson_2",type=bool,default=None)
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -455,9 +441,6 @@ def main():
     a.train_tasks = params.TRAIN_TASKS
     a.gpv_model = model 
     a.args = args 
-    a.combine_lesson = args.combine_lesson
-    a.combine_lesson_2 = args.combine_lesson_2
-    print(a.combine_lesson_2,'combine lesson 2')
     a.policy_network = Weights(len(params.DET_LESSONS),a.batch_size)
 
     #a.policy_network = SLP(len(params.DET_LESSONS))
@@ -467,7 +450,7 @@ def main():
     a.lessons = params.DET_LESSONS
     a.trainer = trainer 
     a.num_trajec = 4
-    a.epochs = 20
+    a.epochs = 15
     a.auto_logger = setup_logger('auto_logger', a.output_dir+'/log_file.log')
   else:
     a = auto_select_utils.resume_training(OUTPUT_DIR)
@@ -479,9 +462,6 @@ def main():
     model, trainer = get_model_and_trainer(a.args)
     a.gpv_model = model 
     a.trainer = trainer 
-    a.combine_lesson = args.combine_lesson
-    a.combine_lesson_2 = args.combine_lesson_2
-    a.epochs=20
     print(a.policy_network.weights)
     #a.start_epoch += 1
   if not os.path.exists(a.output_dir+'/weight_files'):

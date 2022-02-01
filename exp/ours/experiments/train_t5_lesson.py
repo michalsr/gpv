@@ -13,6 +13,10 @@ from exp.ours.data.image_contrast import ImageContrastDataset
 from exp.ours.data.text_contrast import TextContrastDataset
 from exp.ours.data.synonym import SynonymDataset 
 from exp.ours.data.mil import MILDataset
+from exp.ours.data.vqa_classify_obj import VQA_CLS_OBJ_Dataset
+from exp.ours.data.vqa_action_with_obj import VQA_ACT_W_OBJ_Dataset
+from exp.ours.data.vqa_adj_with_obj import VQA_ADJ_W_OBJ_Dataset
+from exp.ours.data.vqa_act_no_obj import VQA_ACT_NO_OBJ_Dataset
 from exp.ours.data.webqa_templates import WebQaQueryGenerator, TemplateWebQueryGenerator
 from exp.ours.experiments.visual_model_cli import add_image_featurizer_args, get_image_featurizer
 from exp.ours.models.layers import *
@@ -51,7 +55,10 @@ def main():
   parser.add_argument("--lesson",type=str,default=None)
   parser.add_argument("--mil",type=str,default=None)
   parser.add_argument("--synonym",type=str,default=None)
- 
+  parser.add_argument("--vqa_cls_obj",type=str,default=None)
+  parser.add_argument("--vqa_act_w_obj",type=str,default=None)
+  parser.add_argument("--vqa_adj_w_obj",type=str,default=None)
+  parser.add_argument("--vqa_act_no_obj",type=str,default=None)
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -169,10 +176,12 @@ def main():
     trainer.best_model_key.append(ResultKey("accuracy", dataset_name="webqa-val"))
   if args.lesson != None:
     lesson_datasets = {'img_contrast':TrainerDataset(ImageContrastDataset('train'),"img-contrast"), "text_contrast":TrainerDataset(TextContrastDataset("train"),"text-contrast"),"mil":TrainerDataset(MILDataset('train'),'mil'),
-    'synonym':TrainerDataset(SynonymDataset("train"),"synonym-train")}
+    'synonym':TrainerDataset(SynonymDataset("train"),"synonym-train"),"vqa_cls_obj":TrainerDataset(VQA_CLS_OBJ_Dataset("train"),"vqa_cls_obj"),"vqa_act_w_obj":TrainerDataset(VQA_ACT_W_OBJ_Dataset("all"),'vqa_act_w_obj'),
+    "vqa_adj_w_obj":TrainerDataset(VQA_ADJ_W_OBJ_Dataset("all"),"vqa_adj_w_obj"),"vqa_act_no_obj":TrainerDataset(VQA_ACT_NO_OBJ_Dataset("train"),"vqa_act_no_obj")}
 
     training_lessons = []
-    lesson_dict = {'img_contrast':args.image_contrast,'text_contrast':args.text_contrast,'mil':args.mil,'synonym':args.synonym}
+    lesson_dict = {'img_contrast':args.image_contrast,'text_contrast':args.text_contrast,'mil':args.mil,'synonym':args.synonym,"vqa_cls_obj":args.vqa_cls_obj,"vqa_act_w_obj":args.vqa_act_w_obj,"vqa_adj_w_obj":args.vqa_adj_w_obj,
+    "vqa_act_no_obj":args.vqa_act_no_obj}
     
     for lesson in lesson_dict:
       if lesson_dict[lesson] != None or args.lesson == 'all':
@@ -184,13 +193,15 @@ def main():
           trainer.num_no_change_val = 0
           logging.info(f'Running lesson {i} out of {len(training_lessons)}')
           trainer.train_datasets.append(lesson_dataset)
-          loc_setup = EvaluationSetup(
-          evaluator.LocalizationEvaluator(),
-          dict(beam_search_spec=None)
-            )
-          val_samples = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_10/val.json')
-          trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=len(val_samples),eval_setup=loc_setup))
-          trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+          vqa_setup = EvaluationSetup(
+      evaluator.VqaEvaluator(),
+      dict(beam_search_spec=BeamSearchSpec(1, 10))
+    )
+          val_samples = io.load_json_object('/data/michal5/gpv/learning_phase_data/vqa/unseen_10/val.json')
+          trainer.eval_samples.append(TrainerDataset(GpvDataset(Task.VQA,"val",True),"vqa-val",eval_sample=len(val_samples),eval_setup=vqa_setup))
+          #trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=len(val_samples),eval_setup=loc_setup))
+          #trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+          trainer.best_model_key.append(evaluator.ResultKey("score", dataset_name="vqa-val"))
           trainer.stratify = True
           trainer.eval_loader = deepcopy(trainer.train_loader)
           trainer.train_loader.persist_workers = False
@@ -205,27 +216,32 @@ def main():
 
         trainer.train_datasets = []
         trainer.train_datasets.append(lesson_dataset)
-        loc_setup = EvaluationSetup(
-          evaluator.LocalizationEvaluator(),
-          dict(beam_search_spec=None)
-            )
-        val_file = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_10/val.json')
-        trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=len(val_file),eval_setup=loc_setup))
-        trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+        vqa_setup = EvaluationSetup(
+        evaluator.VqaEvaluator(),
+          dict(beam_search_spec=BeamSearchSpec(1, 10)))
+            
+        val_samples = io.load_json_object('/data/michal5/gpv/learning_phase_data/vqa/unseen_10/val.json')
+        trainer.eval_samples.append(TrainerDataset(GpvDataset(Task.VQA,"val",True),"vqa-val",eval_sample=len(val_samples),eval_setup=vqa_setup))
+        #trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=len(val_samples),eval_setup=loc_setup))
+        #trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+        trainer.best_model_key.append(evaluator.ResultKey("score", dataset_name="vqa-val"))
+
         trainer.train_another_model(args.output_dir)
     else:
       trainer.upper_bound_no_change = 2 
       trainer.num_no_change_val = 0
       logging.info(f'Running single training lesson')
       trainer.train_datasets.append(training_lessons[0])
-      loc_setup = EvaluationSetup(
-      evaluator.LocalizationEvaluator(),
-      dict(beam_search_spec=None)
-        )
-      val_samples = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_10/val.json')
-      trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=len(val_samples),eval_setup=loc_setup))
-      #trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=4857,eval_setup=loc_setup))
-      trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+      vqa_setup = EvaluationSetup(
+        evaluator.VqaEvaluator(),
+          dict(beam_search_spec=BeamSearchSpec(1, 10)))
+            
+      val_samples = io.load_json_object('/data/michal5/gpv/learning_phase_data/vqa/unseen_10/val.json')
+      trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.VQA,"val",True),"vqa-val",eval_sample=len(val_samples),eval_setup=vqa_setup))
+      #trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val", True),   "det-val",eval_sample=len(val_samples),eval_setup=loc_setup))
+      #trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
+      trainer.best_model_key.append(evaluator.ResultKey("score", dataset_name="vqa-val"))
+
       trainer.stratify = True
       trainer.eval_loader = deepcopy(trainer.train_loader)
       trainer.train_loader.persist_workers = False

@@ -2,7 +2,8 @@ from os.path import join, dirname
 #Options: det, vqa, cic, cap, cls see data/dataset
 TRAIN_TASKS = ['det']
 #options: image_contrast, text_contrast, mil, synonym
-DET_LESSONS = ['mil','image_contrast','synonym','text_contrast']
+DET_LESSONS = ['mil','image_contrast','synonym']
+#DET_LESSONS = ['mil']
 #choose from list above
 LESSONS = DET_LESSONS
 #parallel 
@@ -21,4 +22,4 @@ MIL_BATCH = 1
 #synonym
 SYNONYM_CREATE_BATCH = 2
 SYNONYM_TRAIN_BATCH = 8
-GLOBAL_OUTPUT_FILE = '/shared/rsaas/michal5/gpv_michal/outputs/auto_select/exp_2'
+GLOBAL_OUTPUT_FILE = '/shared/rsaas/michal5/gpv_michal/outputs/auto_select/exp_4'

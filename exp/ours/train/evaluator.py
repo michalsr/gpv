@@ -136,6 +136,9 @@ class VqaEvaluator(PerExampleEvaluator):
     out = []
     for example in examples:
       answer = predictions[example.gpv_id].text[0]
+      print('new entry')
+      print(answer,'answer')
+      print(example.answers,'example answer')
       score = vqa_score(answer, example.answers)
       out.append(dict(score=score))
     return out

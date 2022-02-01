@@ -4,10 +4,14 @@ from dataclasses import replace
 from exp.ours.data.coco_segmentation import SegmentationExample
 from exp.ours.data.gpv_example import GPVExample, SegmentationLabel
 from exp.ours.data.dataset import *
+from exp.ours.data.vqa_act_no_obj import VQA_ACT_NO_OBJ_Example
 import torchvision.transforms as T
 import numpy as np
 from exp.ours.data.image_contrast import ImageContrastExample
 from exp.ours.data.text_contrast import TextContrastExample
+from exp.ours.data.vqa_classify_obj import VQA_CLS_OBJ_Example
+from exp.ours.data.vqa_action_with_obj import VQA_ACT_W_OBJ_Example
+from exp.ours.data.vqa_adj_with_obj import VQA_ADJ_W_OBJ_Example
 from exp.ours.data.mil import MILExample
 from exp.ours.data.synonym import SynonymExample
 from exp.ours.data.webqa import WebQaExample
@@ -17,7 +21,7 @@ NORMALIZE_TRANSFORM = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
 
 def get_stocastic_transforms(task: Task, cls_horizontal_flip=True):
-  if task in {task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA,Task.IMAGECONTRAST,Task.MIL}:
+  if task in {task.CLS, Task.CLS_IN_CONTEXT, Task.WEBQA,Task.IMAGECONTRAST,Task.MIL,Task.TEXTCONTRAST,Task.SYNONYM}:
     transforms = [
       T.RandomApply([
         T.ColorJitter(0.4, 0.4, 0.4, 0.1)
@@ -33,7 +37,7 @@ def get_stocastic_transforms(task: Task, cls_horizontal_flip=True):
       ], p=0.8),
       T.RandomGrayscale(p=0.2),
     ]
-  elif task == task.VQA or task == task.CAPTIONING:
+  elif task == task.VQA or task == task.CAPTIONING or task == task.VQACLSOBJ or task == task.ACTWOBJ or task == task.ADJWOBJ or task == task.ACTNOBJ:
     transforms = [
       T.RandomApply([
         T.ColorJitter(0.2, 0.2, 0.2, 0.0)
@@ -172,7 +176,56 @@ class Gpv1Preprocessor(FromParams):
         query=[self.preprocess_text(example.query)],
         target_answer=answer,meta=example.contrast_group,correct_answer=None,index_of_class=example.answer,relevance_query=example.rel_query
       )]
+    elif isinstance(example,VQA_ACT_NO_OBJ_Example):
+     
+      #print(example.question,example.answer)
+      #print(example.task,'task')
+      out = [GPVExample(
+        example.gpv_id,
+        example.task,
+        example.image_id,
+        [self.preprocess_text(example.question)],
+        query_boxes=default_query_box,
+        target_answer=self.preprocess_text(example.answer),
+        meta=example.meta if include_meta else None,index_of_class=None,correct_answer=None
+      )]
+    elif isinstance(example,VQA_CLS_OBJ_Example):
+     
+      #print(example.question,example.answer)
+      #print(example.task,'task')
+      out = [GPVExample(
+        example.gpv_id,
+        example.task,
+        example.image_id,
+        [self.preprocess_text(example.question)],
+        query_boxes=default_query_box,
+        target_answer=self.preprocess_text(example.answer),
+        meta=example.meta if include_meta else None,index_of_class=None,correct_answer=None
+      )]
+
+    elif isinstance(example,VQA_ACT_W_OBJ_Example):
     
+       out = [GPVExample(
+        example.gpv_id,
+        example.task,
+        example.image_id,
+        [self.preprocess_text(example.query)],
+        query_boxes=default_query_box,
+        target_answer=self.preprocess_text(example.answer),
+        meta=example.meta if include_meta else None,index_of_class=None,correct_answer=None
+      )]
+    elif isinstance(example,VQA_ADJ_W_OBJ_Example):
+        #print(example.answer,'example answer')
+        out = [GPVExample(
+        example.gpv_id,
+        example.task,
+        example.image_id,
+        [self.preprocess_text(example.question)],
+        query_boxes=default_query_box,
+        target_answer=self.preprocess_text(example.answer),
+        meta=example.meta if include_meta else None,index_of_class=None,correct_answer=None
+      )]
+
     elif isinstance(example,TextContrastExample):
       answer = self.preprocess_text(example.answer)
       #final_answer = np.append(answer,int(example.answer))
@@ -190,6 +243,7 @@ class Gpv1Preprocessor(FromParams):
         query=[self.preprocess_text(example.query)],
         target_answer=answer,meta=example.contrast_group,correct_answer=None,index_of_class=example.answer,relevance_query=example.rel_query
       )]
+
     elif isinstance(example,SynonymExample):
 
 
@@ -200,12 +254,9 @@ class Gpv1Preprocessor(FromParams):
         target_answer=answer,correct_answer=None,index_of_class=None,relevance_query=example.rel_query)]
        
     elif isinstance(example,MILExample):
-      print(example.image_id)
-      print(example.query,'query')
-      print(example.answer,'answer')
-      print(example.correct_answer,'correct answer')
-      print(example.rel_query,'rel query')
+
       answer = self.preprocess_text(str(example.answer))
+      #print(example.query,example.correct_answer)
       out = [GPVExample(
         example.gpv_id, example.task, example.image_id,
         query=[self.preprocess_text(example.query)],

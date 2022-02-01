@@ -6,7 +6,7 @@ from exp.ours.image_featurizer.image_featurizer import *
 from exp.ours.util.our_utils import get_devices
 from exp.ours.train.runner import BeamSearchSpec, DataLoaderBuilder
 from exp.ours.train import evaluator
-from exp.ours.train.trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
+from exp.ours.train.lesson_trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
 
 from exp.ours.util.py_utils import MarkIfNotDefault
 
@@ -147,8 +147,8 @@ def get_trainer_from_args(
       elif x.dataset.get_task() == Task.WEBQA:
         x.eval_sample = 1314
       else:
-        x.eval_sample = 12000
-      x.eval_sample=12000
+        x.eval_sample = 39426
+      x.eval_sample=39426
 
   evaluation = {
     Task.VQA: EvaluationSetup(
