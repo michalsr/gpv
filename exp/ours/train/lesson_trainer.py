@@ -386,6 +386,9 @@ class Trainer(FromParams):
   old_model = None
   actual_epoch = None
   epoch_scheduler = None  
+  best_trajec_score = None 
+  prefix = None 
+  val_score = None 
 
   @classmethod
   def from_params(
@@ -415,7 +418,7 @@ class Trainer(FromParams):
             device: DeviceArgsType = None, override=False):
     if output_dir is not None:
       logging.info(f"Initializing model dir {output_dir}")
-      clear_if_nonempty(output_dir, override)
+      #clear_if_nonempty(output_dir, override)
       makedirs(output_dir, exist_ok=True)
       Params(to_params(self, None)).to_file(join(output_dir, "trainer.json"))
       Params(to_params(model, GPVModel)).to_file(join(output_dir, "model.json"))
@@ -594,7 +597,8 @@ class Trainer(FromParams):
         step_scheduler.load_state_dict(train_state.scheduler_state)
     epoch_scheduler = None 
     if self.epoch_scheduler is not None:
-      epoch_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,step_size=2,gamma=0.95)
+      #epoch_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,step_size=10,gamma=0.95)
+      epoch_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=10, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08, verbose=False)
       if train_state.epoch_scheduler_state is not None:
         epoch_scheduler.load_state_dict(train_state.epoch_scheduler_state)
 
@@ -1423,47 +1427,54 @@ class Trainer(FromParams):
       if self.best_model_key and is_primary():
         score = self._get_model_score(results)
         score_dict = {"val":list(results.values())[0]}
+        self.val_score = list(results.values())[0]
         dump_json_object(score_dict,run_dir+'/val_score.json')
 
           
-        if best_saved_score is None or best_saved_score < score:
-          prefix = "Saving as" if run_dir else "Found"
-          if best_saved_score is None:
-            logging.info(f"{prefix} best model ({score:.5f}) ep={epoch+1}")
-          else:
-            logging.info(f"{prefix} best model ({score:.5f} > {best_saved_score:.5f}) ep={epoch+1}")
-          best_saved_score = score
-          if run_dir:
-            best_model_file = join(run_dir, file_paths.BEST_STATE_NAME)
-            torch.save(_base_model.state_dict(), best_model_file)
+        # if best_saved_score is None or best_saved_score < score:
+        #   prefix = "Saving as" if run_dir else "Found"
+        #   if best_saved_score is None:
+        #     logging.info(f"{prefix} best model ({score:.5f}) ep={epoch+1}")
+        #   else:
+        #     logging.info(f"{prefix} best model ({score:.5f} > {best_saved_score:.5f}) ep={epoch+1}")
+        #   best_saved_score = score
+        #   if run_dir:
+        #     best_model_file = join(run_dir, file_paths.BEST_STATE_NAME)
+        #     torch.save(_base_model.state_dict(), best_model_file)
       # if not self.best_model_key:
       #   self.num_no_change_val += 1
     
 
-      if (run_dir is not None and
-          self.save_each_epoch and
-          epoch % self.save_each_epoch == 1):
-        state_file = join(run_dir, f"state-ep{epoch+1}.pth")
-        logging.info(f"Saving state as {state_file}")
-        torch.save(_base_model.state_dict(), state_file)
+      # if (run_dir is not None and
+      #     self.save_each_epoch and
+      #     epoch % self.save_each_epoch == 1):
+      #   state_file = join(run_dir, f"state-ep{epoch+1}.pth")
+      #   logging.info(f"Saving state as {state_file}")
+      #   torch.save(_base_model.state_dict(), state_file)
 
       if run_dir is not None and self.checkpoint:
-        epoch_scheduler.step()
-         
-        checkpoint = _TrainingState(
-            epoch=epoch+1,  # +1 because the epoch has ended
-            loss_ema=loss_ema,
-            global_step=global_step,
-            monitor_ema=monitor_ema,
-            scheduler_state=None if step_scheduler is None else step_scheduler.state_dict(),
-            optimizer_state=optimizer.state_dict(),
-            best_save_score=best_saved_score,
-            model_state=_base_model.state_dict(),
-            epoch_scheduler_state= epoch_scheduler.state_dict()
-        )
-        checkpoint_file = join(run_dir, "checkpoint.pth")
-        logging.info(f"Checkpointing to {checkpoint_file}")
-        torch.save(checkpoint, checkpoint_file)
+        if self.val_score > self.best_trajec_score:
+          if not os.makedir(self.prefix+'/best_model/'):
+            os.mkdir(self.prefix+'/best_model/')
+          epoch_scheduler.step(self.val_score)
+          Params(to_params(self, None)).to_file(join(self.prefix+'/best_model/', "trainer.json"))
+          Params(to_params(model, GPVModel)).to_file(join(self.prefix+'/best_model/', "model.json"))
+          checkpoint = _TrainingState(
+              epoch=epoch+1,  # +1 because the epoch has ended
+              loss_ema=loss_ema,
+              global_step=global_step,
+              monitor_ema=monitor_ema,
+              scheduler_state=None if step_scheduler is None else step_scheduler.state_dict(),
+              optimizer_state=optimizer.state_dict(),
+              best_save_score=best_saved_score,
+              model_state=_base_model.state_dict(),
+              epoch_scheduler_state= epoch_scheduler.state_dict()
+          )
+          self.best_trajec_score = self.val_score 
+          checkpoint_file = join(self.prefix+'/best_model/' "checkpoint.pth")
+          logging.info(f"Checkpointing to {checkpoint_file}")
+          logging.info(f'Update best trajec score to {self.val_score}')
+          torch.save(checkpoint, checkpoint_file)
 
       if epoch == self.end_at_epoch:
         logging.info(f"Hit epoch {self.end_at_epoch}, ending early")

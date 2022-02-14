@@ -234,7 +234,7 @@ class AutoTask(FromParams):
      auto_save_dict = {'train_tasks':self.train_tasks,'args':self.args,'lessons':self.lessons,
      'num_trajec':self.num_trajec,'current_lesson_trajec':self.current_lesson_trajec,'map_int_to_lesson':self.map_int_to_lesson,'map_lesson_to_int':self.map_lesson_to_int,
      'best_model_path':self.best_model_path,'trajec_to_validation_scores':self.trajec_to_validation_scores,'trajec_to_normalized_scores':self.trajec_to_normalized_scores,
-     'trajec_to_output_dir':self.trajec_to_output_dir,'epochs':self.epochs,'outer_log_step':self.outer_log_step,'inner_log_step':self.inner_log_step,
+    'epochs':self.epochs,'outer_log_step':self.outer_log_step,'inner_log_step':self.inner_log_step,
      'start_epoch':self.start_epoch,'start_trajec':self.start_trajec,'best_trajec_score':self.best_trajec_score,'output_dir':self.output_dir,'batch_size':self.batch_size,'temp_best_model_path':self.temp_best_model_path}
      torch.save(auto_save_dict,self.output_dir+'/auto_task_chkpt.pt')
      Params(to_params(self.gpv_model, GPVModel)).to_file(join(self.output_dir+'/', "model.json"))
@@ -284,10 +284,12 @@ class AutoTask(FromParams):
     self.trainer.output_dir = new_output_dir
     self.gpv_model.initialize_from = init_from
     if self.best_model_path != None:
-      self.trainer.train_state_file = self.best_model_path + 'r0/checkpoint.pth' 
+      self.trainer.train_state_file = self.best_model_path + 'checkpoint.pth' 
       self.trainer.old_model = self.best_model_path + 'model.json'
     self.trainer.upper_bound_no_change = 100 
     self.trainer.num_no_change_val = 0
+    self.trainer.best_trajec_score = self.best_trajec_score
+    self.trainer.prefix = self.output_dir
     self.auto_logger.info("Modified trainer for next lesson")
   def compute_normalized_validation(self):
     trajec_scores = list(self.trajec_to_validation_scores.values())
@@ -357,12 +359,12 @@ class AutoTask(FromParams):
 
           self.current_lesson_trajec.append(self.map_int_to_lesson[self.sampled_lesson[i]])
           #adjust trainer
-        new_output_dir = f'{self.output_dir}/epoch_{e}_lesson_{j}/'
+        new_output_dir = f'{self.output_dir}/temp_dir/'
         self.trajec_to_output_dir[f'trajec_{j}'] = new_output_dir
         if e == 0 or self.best_model_path == None:
           init_from = '/shared/rsaas/michal5/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
         else:
-          init_from = self.best_model_path+'r0/best-state.pth'
+          init_from = self.best_model_path+'checkpoint.pth'
         self.adjust_trainer(new_output_dir,init_from,data,e)
         print(self.gpv_model.initialize_from,'initialize from')
         run_trainer_from_args(self.trainer,self.gpv_model,self.args,new_output_dir)
@@ -374,7 +376,7 @@ class AutoTask(FromParams):
         if float(trajec_score['val']) > self.best_trajec_score:
           self.auto_logger.info(f"Best trajec score updated to {trajec_score['val']}")
           self.best_trajec_score = float(trajec_score['val'])
-          self.temp_best_model_path = self.trajec_to_output_dir[f'trajec_{j}'] 
+          self.temp_best_model_path = self.output_dir+'/best_model/' 
         self.log_inner(j)
         self.start_trajec += 1
         self.save()
