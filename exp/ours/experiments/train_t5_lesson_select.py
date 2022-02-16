@@ -221,6 +221,7 @@ class AutoTask(FromParams):
   temp_best_model_path = None 
   temp_best_trajec_score = None 
   trainer_step = None 
+  file_prefix = None 
  
 
   lesson_datasets = {'image_contrast':TrainerDataset(ImageContrastDataset('train'),"img-contrast"),"mil":TrainerDataset(MILDataset('train'),'mil'),
@@ -284,6 +285,7 @@ class AutoTask(FromParams):
     self.trainer.output_dir = new_output_dir
     self.gpv_model.initialize_from = init_from
     if self.best_model_path != None:
+      print(self.best_model_path,'best model path',epoch,'epoch')
       self.trainer.train_state_file = self.best_model_path + 'checkpoint.pth' 
       self.trainer.old_model = self.best_model_path + 'model.json'
     self.trainer.upper_bound_no_change = 100 
@@ -337,7 +339,7 @@ class AutoTask(FromParams):
         self.auto_logger.info("Initialization complete")
         self.save()
       self.auto_logger.info(f'Epoch:{e}')
-      data = io.load_json_object('/shared/rsaas/michal5/gpv_michal/lessons/full_localization_data_3.json')
+      data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/full_localization_data_3.json')
       total_data = len(data)
       random.shuffle(data)
       for j in range(self.start_trajec,self.num_trajec):
@@ -362,20 +364,21 @@ class AutoTask(FromParams):
         new_output_dir = f'{self.output_dir}/temp_dir/'
         self.trajec_to_output_dir[f'trajec_{j}'] = new_output_dir
         if e == 0 or self.best_model_path == None:
-          init_from = '/shared/rsaas/michal5/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
+          init_from = f'{self.file_prefix}/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
         else:
           init_from = self.best_model_path+'checkpoint.pth'
         self.adjust_trainer(new_output_dir,init_from,data,e)
+        self.auto_logger.info(f'initialize from {self.gpv_model.initialize_from}')
         print(self.gpv_model.initialize_from,'initialize from')
         run_trainer_from_args(self.trainer,self.gpv_model,self.args,new_output_dir)
         trajec_score = io.load_json_object(new_output_dir+'r0/val_score.json')
         #trajec_score = {'val':0.5}
-        self.auto_logger.info(f"Trajectory {j} has reward {trajec_score['val']}")
+        self.auto_logger.info(f"Trajectory {j} has reward {self.trainer.val_score}")
   
-        self.trajec_to_validation_scores[f'trajec_{j}'] = float(trajec_score['val'])
-        if float(trajec_score['val']) > self.best_trajec_score:
-          self.auto_logger.info(f"Best trajec score updated to {trajec_score['val']}")
-          self.best_trajec_score = float(trajec_score['val'])
+        self.trajec_to_validation_scores[f'trajec_{j}'] = float(self.trainer.val_score)
+        if float(self.trainer.val_score) > self.best_trajec_score:
+          self.auto_logger.info(f"Best trajec score updated to {self.trainer.val_score}")
+          self.best_trajec_score = float(self.trainer.val_score)
           self.temp_best_model_path = self.output_dir+'/best_model/' 
         self.log_inner(j)
         self.start_trajec += 1
@@ -383,6 +386,7 @@ class AutoTask(FromParams):
         #self.reset()
       self.start_trajec = 0
       self.best_model_path = self.temp_best_model_path
+      self.summary_writer.add_scalar('best_val',self.best_trajec_score,e)
       self.best_trajec_score = 0
      
       self.compute_normalized_validation()
@@ -423,6 +427,7 @@ def main():
   parser.add_argument("--auto_task_output_dir",type=str,default=None)
   parser.add_argument("--combine_lesson",type=bool,default=None)
   parser.add_argument("--combine_lesson_2",type=bool,default=None)
+  parser.add_argument("--file_prefix",type=str,default=None)
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -461,6 +466,7 @@ def main():
     a.combine_lesson_2 = args.combine_lesson_2
     print(a.combine_lesson_2,'combine lesson 2')
     a.policy_network = Weights(len(params.DET_LESSONS),a.batch_size)
+    a.file_prefix = args.file_prefix
 
     #a.policy_network = SLP(len(params.DET_LESSONS))
     #a.policy_network.apply(init_weights)
@@ -481,6 +487,7 @@ def main():
     model, trainer = get_model_and_trainer(a.args)
     a.gpv_model = model 
     a.trainer = trainer 
+    a.file_prefix = args.prefix
     a.combine_lesson = args.combine_lesson
     a.combine_lesson_2 = args.combine_lesson_2
     a.epochs=20

@@ -165,7 +165,7 @@ def convert_to_synonym(sampled_data,contrast_group,id_value):
     coco_to_super = {}
     global_id = 0
     #map coco category to super catogorey 
-    coco_list = io.load_json_object('/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json')
+    coco_list = io.load_json_object(f'/home/michal/gpv_michal/exp/ours/data/coco_categories.json')
     for c in coco_list:
         if c['name'] not in coco_to_super:
             if c['name'] in UNSEEN_COMBINED:

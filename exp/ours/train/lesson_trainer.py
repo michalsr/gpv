@@ -45,6 +45,7 @@ from utils.io import dump_json_object, load_json_object
 import numpy as np
 from exp.ours.data.dataset import GPV1_TASKS, GPV2_TASKS, Task
 from exp.ours.data.gpv import GpvDataset, CocoCategories
+from exp.ours.train.new_lr_scheduler import ReduceLROnPlateau
 
 def get_datasets():
   tasks = {}  # Use a dictionary to preserve ordering
@@ -598,9 +599,14 @@ class Trainer(FromParams):
     epoch_scheduler = None 
     if self.epoch_scheduler is not None:
       #epoch_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,step_size=10,gamma=0.95)
-      epoch_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=10, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08, verbose=False)
+      epoch_scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=10, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08, verbose=False)
       if train_state.epoch_scheduler_state is not None:
         epoch_scheduler.load_state_dict(train_state.epoch_scheduler_state)
+        optimizer = epoch_scheduler.step(optimizer)
+      new_lr = optimizer.param_groups[0]['lr']
+      logging.info(f'Current learning rate:{new_lr}')
+      logging.info(f'stored schedule {epoch_scheduler.last_best_val_score}')
+      #print(optimizer.param_groups[0]['lr'])
 
     return optimizer, step_scheduler,epoch_scheduler
 
@@ -1396,8 +1402,8 @@ class Trainer(FromParams):
                   n_frozen = sum(not x.requires_grad for x in group["params"]) / len(group["params"])
                   if n_frozen > 0:
                     summary_writer.add_scalar(f'lr/{name}-frozen', n_frozen, global_step)
-      print(epoch_scheduler.get_last_lr())
-      summary_writer.add_scalar('lr_epoch',epoch_scheduler.get_last_lr()[0],self.actual_epoch)
+      #print(epoch_scheduler.get_last_lr())
+      #summary_writer.add_scalar('lr_epoch',epoch_scheduler.get_last_lr()[0],self.actual_epoch)
       ep_end = perf_counter()
       if self.eval_at is not None and (epoch+1) % self.eval_at != 0:
         continue
@@ -1410,6 +1416,7 @@ class Trainer(FromParams):
       results = self._run_eval(_base_model, eval_runners, global_step, runtime.seed, eval_dir)
       eval_end = perf_counter()
       val_score = list(results.values())[0]
+      self.val_score = val_score 
       if self.best_val == None:
         self.best_val = int(val_score)
       else:
@@ -1451,12 +1458,13 @@ class Trainer(FromParams):
       #   state_file = join(run_dir, f"state-ep{epoch+1}.pth")
       #   logging.info(f"Saving state as {state_file}")
       #   torch.save(_base_model.state_dict(), state_file)
-
+      logging.info(f'best trajec score {self.best_trajec_score}')
+      logging.info(f'current val score {self.val_score}')
       if run_dir is not None and self.checkpoint:
-        if self.val_score > self.best_trajec_score:
-          if not os.makedir(self.prefix+'/best_model/'):
+        if float(self.val_score) > float(self.best_trajec_score):
+          if not os.path.exists(self.prefix+'/best_model/'):
             os.mkdir(self.prefix+'/best_model/')
-          epoch_scheduler.step(self.val_score)
+          epoch_scheduler.last_best_val_score = self.val_score 
           Params(to_params(self, None)).to_file(join(self.prefix+'/best_model/', "trainer.json"))
           Params(to_params(model, GPVModel)).to_file(join(self.prefix+'/best_model/', "model.json"))
           checkpoint = _TrainingState(

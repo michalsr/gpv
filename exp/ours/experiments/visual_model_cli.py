@@ -5,7 +5,7 @@ from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 from exp.ours.image_featurizer.clip_featurizer import ClipFeaturizer, RoIFeatureSource
-from exp.ours.image_featurizer.detectron_detectors import DetectronBackboneWithBoxes
+#from exp.ours.image_featurizer.detectron_detectors import DetectronBackboneWithBoxes
 from exp.ours.image_featurizer.detr_featurizer import PretrainedDetrFeaturizer, \
   BoxesWithDetrBackbone
 from exp.ours.image_featurizer.image_featurizer import *
