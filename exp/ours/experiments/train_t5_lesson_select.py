@@ -277,12 +277,12 @@ class AutoTask(FromParams):
           dict(beam_search_spec=None)
             )
     #TODO add param for file name
-    val_samples_1 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1/val.json')
-    val_samples_2 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2/val.json')
-    val_samples_3 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/seen/val.json')
-    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'unseen_group_1'),   "det-val-unseen-1",eval_sample=len(val_samples_1),eval_setup=loc_setup))
-    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'unseen_group_2'),   "det-val-unseen-2",eval_sample=len(val_samples_2),eval_setup=loc_setup))
-    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'seen'),   "det-val-seen",eval_sample=len(val_samples_3),eval_setup=loc_setup))
+    val_samples_1 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase/val.json')
+    val_samples_2 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2_single_phrase/val.json')
+    val_samples_3 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/seen_single_phrase/val.json')
+    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'unseen_group_1_single_phrase'),   "det-val-unseen-1",eval_sample=len(val_samples_1),eval_setup=loc_setup))
+    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'unseen_group_2_single_phrase'),   "det-val-unseen-2",eval_sample=len(val_samples_2),eval_setup=loc_setup))
+    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'seen_single_phrase'),   "det-val-seen",eval_sample=len(val_samples_3),eval_setup=loc_setup))
 
     self.trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
     self.trainer.stratify = True
@@ -489,24 +489,32 @@ def main():
     #a.policy_network = Weights(len(params.DET_LESSONS),a.batch_size)
     a.auto_logger = setup_logger('auto_logger', a.output_dir+'/log_file.log')
     a.file_prefix = args.file_prefix
-    a.policy_network = Weights(len(params.DET_LESSONS),a.batch_size)
+
     #a.policy_network = SLP(len(params.DET_LESSONS))
     #a.policy_network.apply(init_weights)
     #a.policy_opt = torch.optim.Adam(a.policy_network.parameters())
     #print(len(list(a.policy_network.parameters())))
-    if args.lessons == None:
-      a.lessons = params.DET_LESSONS
-    else:
+    print(args.lessons,'arg lessons')
+    print(args.outer_epochs,'outer epochs')
+    if args.lessons != None:
       a.lessons = args.lessons
+   
+    else:
+         a.lessons = params.DET_LESSONS
+    print(a.lessons,'trainer lessons')
+    a.policy_network = Weights(len(a.lessons),a.batch_size)
     a.trainer = trainer 
-    if args.num_trajec == None:
-      a.num_trajec = 1
+    if args.num_trajec != None:
+       a.num_trajec = int(args.num_trajec)
+    
     else:
-      a.num_trajec = int(args.num_trajec)
-    if args.outer_epochs == None:
-      a.epochs = 20
+       a.num_trajec = 1
+    if args.outer_epochs != None:
+       a.epochs = int(args.outer_epochs)
+   
     else:
-      a.epochs = int(args.outer_epochs)
+         a.epochs = 20
+    print(a.epochs,'trainer epochs')
 
     
    
