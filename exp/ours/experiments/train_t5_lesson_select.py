@@ -224,6 +224,7 @@ class AutoTask(FromParams):
   file_prefix = None 
   update_weights = None 
   global_best_val = -1
+  batch_eval = None 
  
 
   lesson_datasets = {'image_contrast':TrainerDataset(ImageContrastDataset('train'),"img-contrast"),"mil":TrainerDataset(MILDataset('train'),'mil'),
@@ -234,15 +235,23 @@ class AutoTask(FromParams):
       self.gpv_model = model 
       self.trainer = trainer
   def save(self):
-     auto_save_dict = {'train_tasks':self.train_tasks,'args':self.args,'lessons':self.lessons,
-     'num_trajec':self.num_trajec,'current_lesson_trajec':self.current_lesson_trajec,'map_int_to_lesson':self.map_int_to_lesson,'map_lesson_to_int':self.map_lesson_to_int,
-     'best_model_path':self.best_model_path,'trajec_to_validation_scores':self.trajec_to_validation_scores,'trajec_to_normalized_scores':self.trajec_to_normalized_scores,
-    'epochs':self.epochs,'outer_log_step':self.outer_log_step,'inner_log_step':self.inner_log_step,'temp_best_trajec_score':self.temp_best_trajec_score,'global_best_val':self.global_best_val,
-     'start_epoch':self.start_epoch,'start_trajec':self.start_trajec,'best_trajec_score':self.best_trajec_score,'output_dir':self.output_dir,'batch_size':self.batch_size,'temp_best_model_path':self.temp_best_model_path}
-     torch.save(auto_save_dict,self.output_dir+'/auto_task_chkpt.pt')
-     Params(to_params(self.gpv_model, GPVModel)).to_file(join(self.output_dir+'/', "model.json"))
-     save_dict = {'weights':self.policy_network.state_dict(),'optim':self.policy_network.optimizer.state_dict(),'log_prob':self.policy_network.log_prob}
-     torch.save(save_dict,self.output_dir+'/policy_chkpt.pt')
+   
+    #  auto_save_dict = {'train_tasks':self.train_tasks,'args':self.args,'lessons':self.lessons,
+    #  'num_trajec':self.num_trajec,'current_lesson_trajec':self.current_lesson_trajec,'map_int_to_lesson':self.map_int_to_lesson,'map_lesson_to_int':self.map_lesson_to_int,
+    #  'best_model_path':self.best_model_path,'trajec_to_validation_scores':self.trajec_to_validation_scores,'trajec_to_normalized_scores':self.trajec_to_normalized_scores,
+    # 'epochs':self.epochs,'outer_log_step':self.outer_log_step,'inner_log_step':self.inner_log_step,'temp_best_trajec_score':self.temp_best_trajec_score,'global_best_val':self.global_best_val,
+    #  'start_epoch':self.start_epoch,'start_trajec':self.start_trajec,'best_trajec_score':self.best_trajec_score,'output_dir':self.output_dir,'batch_size':self.batch_size,'temp_best_model_path':self.temp_best_model_path}
+    no_save = ['trainer','policy_network','auto_logger','summary_writer','policy_opt']
+    auto_save_dict = {}
+    for attr,value in self.__dict__.items():
+      if attr not in no_save:
+        auto_save_dict[attr] = value 
+    
+    torch.save(auto_save_dict,self.output_dir+'/auto_task_chkpt.pt')
+    Params(to_params(self.gpv_model, GPVModel)).to_file(join(self.output_dir+'/', "model.json"))
+    #Params(to_params(self.gpv_model,[] GPVModel)).to_file(join(self.output_dir+'/', "model.json"))
+    save_dict = {'weights':self.policy_network.state_dict(),'optim':self.policy_network.optimizer.state_dict(),'log_prob':self.policy_network.log_prob}
+    torch.save(save_dict,self.output_dir+'/policy_chkpt.pt')
 
 
   def initialize(self):
@@ -262,6 +271,7 @@ class AutoTask(FromParams):
     self.outer_log_step = 0
   def adjust_trainer(self,new_output_dir,init_from,data,epoch):
     training_datasets = create_training_datasets(data,self.sampled_lesson,self.batch_size,self.map_int_to_lesson,self.lesson_datasets,combine_same_lesson=False)
+    self.trainer.batch_eval = self.batch_eval
     self.trainer.global_best_val = self.global_best_val
     self.trainer.actual_epoch = epoch
     self.trainer.epoch_scheduler = True 
@@ -445,6 +455,8 @@ def main():
   parser.add_argument("--lessons",nargs='+',default=None)
   parser.add_argument("--num_trajec",type=str,default=None)
   parser.add_argument("--outer_epochs",type=str,default=None)
+  parser.add_argument("--batch_eval",type=str,default=None)
+  
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -472,6 +484,8 @@ def main():
     clear_if_nonempty(OUTPUT_DIR, override=False)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.mkdir(OUTPUT_DIR+'/tensorboard')
+    with open(OUTPUT_DIR+'/command_line.txt','w+') as f:
+      json.dump(args.__dict__,f,indent=2)
     model, trainer = get_model_and_trainer(args)
     a = AutoTask()
     a.output_dir = OUTPUT_DIR
@@ -489,7 +503,8 @@ def main():
     #a.policy_network = Weights(len(params.DET_LESSONS),a.batch_size)
     a.auto_logger = setup_logger('auto_logger', a.output_dir+'/log_file.log')
     a.file_prefix = args.file_prefix
-
+    if args.batch_eval != None:
+      a.batch_eval = True 
     #a.policy_network = SLP(len(params.DET_LESSONS))
     #a.policy_network.apply(init_weights)
     #a.policy_opt = torch.optim.Adam(a.policy_network.parameters())
@@ -515,6 +530,7 @@ def main():
     else:
          a.epochs = 20
     print(a.epochs,'trainer epochs')
+  
 
     
    
@@ -528,16 +544,26 @@ def main():
     model, trainer = get_model_and_trainer(a.args)
     a.gpv_model = model 
     a.trainer = trainer 
-    a.file_prefix = args.prefix
+    a.file_prefix = args.file_prefix
     a.combine_lesson = args.combine_lesson
     a.combine_lesson_2 = args.combine_lesson_2
-    a.epochs=20
+    if args.num_trajec != None:
+      a.num_trajec = int(args.num_trajec)
+  
+    else:
+      a.num_trajec = 1
+    if args.outer_epochs != None:
+      a.epochs = int(args.outer_epochs)
+   
+    else:
+         a.epochs = 20
     print(a.policy_network.weights)
     #a.start_epoch += 1
   if not os.path.exists(a.output_dir+'/weight_files'):
     os.mkdir(a.output_dir+'/weight_files')
   print(a.best_model_path)
   print(a.best_trajec_score)
+  a.save()
   a.run()
 
 if __name__ == '__main__':

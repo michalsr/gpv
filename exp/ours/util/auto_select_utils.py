@@ -37,27 +37,8 @@ import torch.optim
 def load_auto_task_params(output_dir):
     a = AutoTask()
     auto_select_params = torch.load(output_dir+'/auto_task_chkpt.pt')
-    a.train_tasks = auto_select_params['train_tasks']
-    a.args = auto_select_params['args']
-    a.lessons = auto_select_params['lessons']
-    a.num_trajec = auto_select_params['num_trajec']
-    a.current_lesson_trajec = auto_select_params['current_lesson_trajec']
-    a.map_int_to_lesson = auto_select_params['map_int_to_lesson']
-    a.map_lesson_to_int = auto_select_params['map_lesson_to_int']
-    a.best_model_path = auto_select_params['best_model_path']
-    a.trajec_to_validation_scores = auto_select_params['trajec_to_validation_scores']
-    a.trajec_to_normalized_scores = auto_select_params['trajec_to_normalized_scores']
-    a.trajec_to_output_dir = auto_select_params['trajec_to_output_dir']
-    a.epochs = auto_select_params['epochs']
-    a.outer_log_step = auto_select_params['outer_log_step']
-    a.inner_log_step = auto_select_params['inner_log_step']
-    a.start_epoch = auto_select_params['start_epoch']
-    a.start_trajec = auto_select_params['start_trajec']
-    a.best_trajec_score = auto_select_params['best_trajec_score']
-    if 'output_dir' in auto_select_params.keys():
-        a.output_dir = auto_select_params['output_dir']
-    if 'batch_size' in auto_select_params.keys():
-        a.batch_size = auto_select_params['batch_size']
+    for k in auto_select_params:
+        setattr(a,k,auto_select_params[k])
     return a 
 def load_policy_net(output_dir,num_lessons):
     w = Weights(num_lessons,12)
