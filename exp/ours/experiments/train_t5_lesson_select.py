@@ -403,6 +403,9 @@ class AutoTask(FromParams):
         trajec_score = io.load_json_object(new_output_dir+'r0/val_score.json')
         #trajec_score = {'val':0.5}
         self.auto_logger.info(f"Trajectory {j} has reward {self.trainer.val_score}")
+        self.summary_writer.add_scalar('unseen_1_val',self.trainer.unseen_1_val,self.inner_log_step)
+        self.summary_writer.add_scalar('unseen_2_val',self.trainer.unseen_2_val,self.inner_log_step)
+        self.summary_writer.add_scalar('seen_val',self.trainer.seen_val,self.inner_log_step)
   
         self.trajec_to_validation_scores[f'trajec_{j}'] = float(self.trainer.val_score)
         if float(self.trainer.val_score) > self.global_best_val:

@@ -392,6 +392,9 @@ class Trainer(FromParams):
   prefix = None 
   val_score = None 
   batch_eval = None 
+  unseen_1_val = None 
+  unseen_2_val = None
+  seen_val = None
 
   @classmethod
   def from_params(
@@ -713,6 +716,13 @@ class Trainer(FromParams):
             #   print('loader 0')
             #   pdb.set_trace()
             total_lesson_datasets.append(loader)
+       elif lesson[0].task == Task.DETECTION:
+     
+          print('using detection')
+          new_all_train = []
+          for i in range(len(lesson)):
+            new_all_train.append(lesson[i])
+          global_all_train.append(new_all_train)
 
     # if not self.lesson_training:
     #   for grp in training_examples:
@@ -863,7 +873,7 @@ class Trainer(FromParams):
     logging.info(f'Total number of examples {total_num_examples}')
   
 
-    sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(global_all_train))),batch_size=2,drop_last=True)
+    sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(global_all_train))),batch_size=1,drop_last=True)
     # samples = [x.train_sample for x in self.train_datasets]
     # sampler = StratifiedSubsetSampler(
     # all_train_sizes, runtime.seed, self.stratify, samples, 15, None, None)
@@ -1450,12 +1460,22 @@ class Trainer(FromParams):
       if summary_writer:
         summary_writer.add_scalar("time/train", ep_end-ep_start, epoch+1)
         summary_writer.add_scalar("time/eval", eval_end - eval_start, epoch + 1)
+      all_scores = {}
       for k in results:
           if 'unseen-1' in str(k):
             self.val_score = float(results[k])
+            self.unseen_1_val = float(results[k])
+          elif 'unseen-2' in str(k):
+            self.unseen_2_val = float(results[k])
+          else:
+            assert 'seen' in str(k)
+            self.seen_val = float(results[k])
+         
       score_dict = {"val":self.val_score}
+    
       # self.val_score = list(results.values())[0]
       dump_json_object(score_dict,run_dir+'/val_score.json')
+      dump_json_object(all_scores,run_dir+'/all_scores.json')
     
         #score = self._get_model_score(results)
        
