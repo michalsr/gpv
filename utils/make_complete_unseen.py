@@ -2,6 +2,7 @@ import json
 import utils.io as io
 import os
 
+#validation 
 UNSEEN1 = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
              'sheep', 'suitcase', 'surfboard', 'wine glass']
 UNSEEN2 = ['banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
@@ -10,102 +11,97 @@ UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
              'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
 
-def save_entry(prefix,dictionary,file_name):
-    if not os.path.exists(prefix):
-        os.makedirs(prefix)
-    io.dump_json_object(dictionary,prefix+'/'+file_name+'.json')
-def make_20():
-    dist = []
-    ids = set()
-    prefix = '/data/michal5/gpv/learning_phase_data/web_20_temp'
-    file = io.load_json_object(prefix+'/test.json')
-    for f in file:
-        cat = []
-        if len(f['coco_categories']['seen']) != 0:
-            for c in f['coco_categories']['seen']:
-                cat.append(c)
-        if len(f['coco_categories']) != 0:
-            for c in f['coco_categories']['unseen']:
-                cat.append(c)
-        if len(cat) != 0:
-            if  all(c in UNSEEN_COMBINED for c in cat) and int(f["id"]) not in ids:
-                dist.append(f)
-                ids.add(int(f["id"]))
-    io.dump_json_object(dist,'/data/michal5/gpv/learning_phase_data/web_20/test.json')
-def main():
-    category_id = []
-    unseen_categories= {}
-    category_to_image_id = {}
-    image_ids = {'train':{'image_ids':[]},'val':{'image_ids':[]},'test':{'image_ids':[]}}
-    list_unseen = io.load_json_object('/data/michal5/gpv/learning_phase_data/split_coco_categories/category_split.json')
-    list_of_held_out = ['held_from_vqa','held_from_det']
-    for k in list_unseen:
-        if k in list_of_held_out:
-            categories = list_unseen[k]
-            for c in categories:
-                category_id.append(c['id'])
-                unseen_categories[c['id']] = c['name']
-    print(unseen_categories)
-    # save_entry('/data/michal5/gpv/learning_phase_data/split_coco_categories',unseen_categories,'held_out_all')
-
-    # gpv_classification = io.load_json_object(file_name)
-    # unseen_classification = []
+def new_train():
+    train = []
+    gpv_split = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/original_split/train.json')
+    for entry in gpv_split:
+        if entry['category_name'] not in UNSEEN_COMBINED:
+            train.append(entry)
+    print(f'{len(train)} number of new train')
     
-    # for entry in gpv_classification:
+    if not os.path.exists('/data/michal5/gpv/learning_phase_data/coco_detection/seen_only'):
+        os.mkdir('/data/michal5/gpv/learning_phase_data/coco_detection/seen_only')    
+                     
+    if not os.path.exists('/shared/rsaas/michal5/gpv_michal/coco_det_train_seen_only'):
+        os.mkdir('/shared/rsaas/michal5/gpv_michal/coco_det_train_seen_only')
+    io.dump_json_object(train,'/data/michal5/gpv/learning_phase_data/coco_detection/seen_only/train.json')
+    io.dump_json_object(train,'/shared/rsaas/michal5/gpv_michal/coco_det_train_seen_only/train.json')  
+def new_val():
+    unseen_1_val = []
+    unseen_1_test = []
+    unseen_2_val = []
+    unseen_2_test = []
+    other_val = []
+    other_test = []
+
+    val_split = []
+    test_split = []
+    gpv_splits = [io.load_json_object('/data/michal5/gpv/learning_phase_data/'+'coco_detection/'+'original_split/'+'val.json'),io.load_json_object('/data/michal5/gpv/learning_phase_data/'+'coco_detection/'+'gpv_split/'+'test.json')]         
+    for i,split in enumerate(gpv_splits):
+      for entry in split:
+            coco_classes_1 = []
+            coco_classes_2 = []
+            entry['query'] = f"Localize the {entry['category_name']}"
+            if entry['category_name'] in UNSEEN1:
+                
+                if i ==0:
+                    unseen_1_val.append(entry)
+                else:
+                    unseen_1_test.append(entry)
+            if entry['category_name'] in UNSEEN2:
+               
+                if i ==0:
+                    unseen_2_val.append(entry)
+                else:
+                    unseen_2_test.append(entry)
+            else:
+                if i ==0:
+                    other_val.append(entry)
+                else:
+                    other_test.append(entry)
+                    
+                 
+           
+    print(f'{len(unseen_1_val)} is unseen 1 val length')
+    print(f'{len(unseen_1_test)} is unseen 1 test length')
+    print(f'{len(unseen_2_val)} is unseen 2 val length')
+    print(f'{len(unseen_2_test)} is unseen 2 test length')
+    print(f'{len(other_val)} is other val length')
+    print(f'{len(other_test)} is other test length')
+    if not os.path.exists('/shared/rsaas/michal5/gpv_michal/coco_det_val_all_single_phrase'):
+        os.mkdir('/shared/rsaas/michal5/gpv_michal/coco_det_val_all_single_phrase')
+                
+    if not os.path.exists('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase'):
+        os.mkdir('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase')    
+                     
+    if not os.path.exists('/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_1_single_phrase'):
+        os.mkdir('/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_1_single_phrase')    
+    io.dump_json_object(unseen_1_val,'/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase/val.json')
+    io.dump_json_object(unseen_1_test,'/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase/test.json')
+    io.dump_json_object(unseen_1_val,'/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_1_single_phrase/val.json')
+    io.dump_json_object(unseen_1_test,'/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_1_single_phrase/test.json')
+    if not os.path.exists('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2_single_phrase'):
+        os.mkdir('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2_single_phrase')
+    if not os.path.exists('/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_2_single_phrase'):
+        os.mkdir('/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_2_single_phrase')
+    io.dump_json_object(unseen_2_val,'/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2_single_phrase/val.json')
+    io.dump_json_object(unseen_2_test,'/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2_single_phrase/test.json')
+    io.dump_json_object(unseen_2_val,'/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_2_single_phrase/val.json')
+    io.dump_json_object(unseen_2_test,'/shared/rsaas/michal5/gpv_michal/coco_det_val_all/unseen_group_2_single_phrase/test.json')
+    
+
+    if not os.path.exists('/data/michal5/gpv/learning_phase_data/coco_detection/seen_single_phrase'):
+        os.mkdir('/data/michal5/gpv/learning_phase_data/coco_detection/seen_single_phrase')
+    if not os.path.exists('/shared/rsaas/michal5/gpv_michal/coco_det_val_all/seen_single_phrase'):
+        os.mkdir('/shared/rsaas/michal5/gpv_michal/coco_det_val_all/seen_single_phrase')
+    io.dump_json_object(other_val,'/data/michal5/gpv/learning_phase_data/coco_detection/seen_single_phrase/val.json')
+    io.dump_json_object(other_test,'/data/michal5/gpv/learning_phase_data/coco_detection/seen_single_phrase/test.json')
+    io.dump_json_object(other_val,'/shared/rsaas/michal5/gpv_michal/coco_det_val_all/seen_single_phrase/val.json')
+    io.dump_json_object(other_test,'/shared/rsaas/michal5/gpv_michal/coco_det_val_all/seen_single_phrase/test.json')
+    
 
 
-    #     if int(entry['category_id']) not in category_id:
-            
-    #         unseen_classification.append(entry)
-    # print(len(unseen_classification))
 
-    sub_folders = ['coco_classification','coco_detection','vqa','coco_captions']
-    #sub_folders = ['coco_classification']
-    training_type = ['train','val','test']
-
-    for folder in sub_folders:
-     
-        for data_type in training_type:
-            new_split = []
-            ids_used = set()
-            gpv_split = io.load_json_object('/data/michal5/gpv/learning_phase_data/'+folder+'/gpv_split/'+data_type+'.json')
-         
-            for entry in gpv_split:
-                if 'category_id' in entry:
-                    if int(entry['category_id']) not in unseen_categories.keys() and int(entry['id']) not in ids_used:
-                        new_split.append(entry)
-                        ids_used.add(int(entry['id']))
-
-                elif 'coco_categories' in entry:
-                    if folder =='coco_captions':
-                        entry_id = entry['cap_id']
-                    elif folder == 'vqa':
-                        entry_id = entry['question_id']
-                    in_unseen = False
-                    coco_classes = []
-                    if len(entry['coco_categories']['seen']) != 0:
-                        for c in entry['coco_categories']['seen']:
-                            coco_classes.append(c)
-                    if len(entry['coco_categories']) != 0:
-                        for c in entry['coco_categories']['unseen']:
-                            coco_classes.append(c)
-                    if len(coco_classes) != 0:
-                        if not  all(c in unseen_categories.values() for c in coco_classes) and int(entry_id) not in ids_used:
-                            new_split.append(entry)
-                            ids_used.add(int(entry_id))
-
-
-                if folder == 'coco_classification':
-                    if entry['image']['image_id'] not in image_ids[data_type]['image_ids']:
-                        image_ids[data_type]['image_ids'].append(entry['image']['image_id'])
-            save_entry('/data/michal5/gpv/learning_phase_data/'+folder+'/seen_60',new_split,data_type)
-            save_entry('/shared/rsaas/michal5/seen_60/'+folder+'/seen_60',new_split,data_type)
-            print(len(new_split))
-        # if folder == 'coco_classification':
-        #     save_entry('/data/michal5/gpv/learning_phase_data/split_coco_images/held_out_all',image_ids['train'],'train')
-        #     save_entry('/data/michal5/gpv/learning_phase_data/split_coco_images/held_out_all',image_ids['val'],'val')
-        #     save_entry('/data/michal5/gpv/learning_phase_data/split_coco_images/held_out_all',image_ids['test'],'test')
-            
 
 if __name__ == '__main__':
-  main()
+  new_train()

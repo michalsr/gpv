@@ -5,6 +5,7 @@ import sys
 import pdb
 import random 
 from copy import deepcopy
+import collections
 from exp.ours.data.dataset import Task, GPV1_TASKS, GPV2_TASKS
 from typing import List, Optional, Dict, Any, Union, Tuple
 from exp.ours import params 
@@ -14,7 +15,7 @@ from exp.ours.models.model import GPVModel
 from exp.ours.experiments.configure_train_datasets import create_training_datasets
 from torch.utils.tensorboard import SummaryWriter
 import torch 
-from exp.ours.train.lesson_trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
+from exp.ours.train.lesson_trainer_temp import TrainerDataset, RunArgs, Trainer, EvaluationSetup
 import torch.utils.data
 from transformers import AutoConfig
 from allennlp.common import FromParams, Params, Registrable
@@ -256,6 +257,7 @@ class AutoTask(FromParams):
 
 
 
+
   def initialize(self):
     #TODO allow for multiple train tasks and check that lessons match tasks
     #py_utils.add_stdout_logger()
@@ -269,6 +271,7 @@ class AutoTask(FromParams):
     for i,l in enumerate(self.lessons):
       self.map_int_to_lesson[i] = l
       self.map_lesson_to_int[l] = i
+    print(self.map_int_to_lesson)
     self.inner_log_step = 0
     self.outer_log_step = 0
   def adjust_trainer(self,new_output_dir,init_from,data,epoch):

@@ -277,7 +277,7 @@ class BasicGPVLoss(GPVLoss):
       #print(idx,'idx')
       final_logits = torch.cuda.FloatTensor(max_logits).to("cuda:0")
       #final_logits = torch.cuda.FloatTensor(torch.max(logits[:,:,0],1)[0]).to("cuda:0")
-      #print(final_logits,'logits')
+      print(final_logits,'logits')
       loss = F.binary_cross_entropy_with_logits(final_logits.cuda(),torch.FloatTensor(batch_labels).cuda()).cuda()
       #print(loss,'loss')
       return loss 
@@ -316,9 +316,9 @@ class BasicGPVLoss(GPVLoss):
     total_loss = 0
     
     for task, ix_lst in task_to_ix.items() :
-      #print(task==Task.TEXTCONTRAST,'task')
+      print(task==Task.TEXTCONTRAST,'task')
       
-      #pdb.set_trace()
+      pdb.set_trace()
       ixs = torch.as_tensor(ix_lst, device=labels.device, dtype=torch.long)
       n_boxes = prediction.n_boxes
       if task == Task.DETECTION:

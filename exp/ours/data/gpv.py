@@ -38,7 +38,8 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
     raise NotImplementedError(kind)
   if ds == "web_80":
     split_txt = ""
-  split_txt = "unseen_10"
+  #split_txt = split_txt
+  print(split_txt,'split txt')
   #split_txt = "gpv_split"
   # elif unseen_split==True:
   #   split_txt = "held_out_all"
@@ -51,10 +52,10 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
   return load_json_object(target_file)
 
 
-def load_gpv_boxes(split, gpv_split,split_txt) -> List[LocalizationExample]:
+def load_gpv_boxes(split, gpv_split,split_txt,raw_instances=None) -> List[LocalizationExample]:
   """Load GPV-I detection data"""
-
-  raw_instances = load_instances("detection", split, gpv_split,split_txt)
+  if raw_instances == None:
+    raw_instances = load_instances("detection", split, gpv_split,split_txt)
   out = []
   for x in raw_instances:
     if "coco_categories" in x:
@@ -80,10 +81,10 @@ def load_gpv_boxes(split, gpv_split,split_txt) -> List[LocalizationExample]:
   return out
 
 
-def load_gpv_vqa(split, gpv_split,split_txt) -> List[VqaExample]:
+def load_gpv_vqa(split, gpv_split,split_txt,raw_instances=None) -> List[VqaExample]:
   """Load GPV-I VQA data"""
-
-  raw_instances = load_instances("vqa", split, gpv_split,split_txt)
+  if raw_instances == None:
+    raw_instances = load_instances("vqa", split, gpv_split,split_txt)
   out = []
   for x in raw_instances:
     cats = x.get("coco_categories")
@@ -104,10 +105,10 @@ def load_gpv_vqa(split, gpv_split,split_txt) -> List[VqaExample]:
   return out
 
 
-def load_gpv_captioning(split, gpv_split,split_txt) -> List[CaptioningExample]:
+def load_gpv_captioning(split, gpv_split,split_txt,raw_instances=None) -> List[CaptioningExample]:
   """Load GPV-I captioning data"""
-
-  raw_instances = load_instances("cap", split, gpv_split,split_txt)
+  if raw_instances == None:
+    raw_instances = load_instances("cap", split, gpv_split,split_txt)
   grouped_by_image = defaultdict(list)
   for i, x in enumerate(raw_instances):
     meta = {}
@@ -136,15 +137,15 @@ def load_gpv_captioning(split, gpv_split,split_txt) -> List[CaptioningExample]:
   return out
 
 
-def load_gpv_cls(split, gpv_split,split_txt) -> List[ClsExample]:
-  return _load_gpv_cls(split, gpv_split,split_txt, False)
+def load_gpv_cls(split, gpv_split,split_txt,raw_instances=None) -> List[ClsExample]:
+  return _load_gpv_cls(split, gpv_split,split_txt,raw_instances)
 
 
-def load_gpv_ident(split, gpv_split,split_txt) -> List[ClsExample]:
-  return _load_gpv_cls(split, gpv_split, split_txt,True)
+def load_gpv_ident(split, gpv_split,split_txt,raw_instances=None) -> List[ClsExample]:
+  return _load_gpv_cls(split, gpv_split, split_txt,raw_instances,True)
 
 
-def _load_gpv_cls(split, gpv_split, split_txt,in_context=False) -> List:
+def _load_gpv_cls(split, gpv_split, split_txt,raw_instances=None,in_context=False) -> List:
   """Load GPV-I CLS data"""
   if in_context:
     def fn(i, image_id, category_id, box, meta):
@@ -174,9 +175,10 @@ def _load_gpv_cls(split, gpv_split, split_txt,in_context=False) -> List:
   return out
 
 
-def load_webqa(split) -> List[ClsExample]:
+def load_webqa(split,raw_instances=None) -> List[ClsExample]:
   """Load WebQA data"""
-  raw_instances = load_instances("webqa", split)
+  if raw_instances == None:
+    raw_instances = load_instances("webqa", split)
   out = []
   for x in raw_instances:
     meta = {"gpv1-query": x["query"], "bing-query": x["bing_query"],
@@ -254,7 +256,7 @@ class GpvDataset(Dataset):
 
   def __init__(self, task: Task, split: str, gpv_split=True,
                sample=None, seen_sample=None, unseen_sample=None,
-               per_example_captions=False,split_txt="gpv_split"):
+               per_example_captions=False,split_txt="gpv_split",raw_instances=None):
     if split not in {"test", "val", "train"}:
       raise ValueError(split)
     if sample is not None and (seen_sample is not None or unseen_sample is not None):
@@ -267,6 +269,7 @@ class GpvDataset(Dataset):
     self.unseen_sample = unseen_sample
     self.per_example_captions = per_example_captions
     self.split_txt = split_txt
+    self.raw_instances = raw_instances
 
   def get_name(self):
     kind = "gpvsce" if self.gpv_split else "gpv"
@@ -289,7 +292,7 @@ class GpvDataset(Dataset):
   def change_split(self,new_split):
     self.split_txt = new_split
   def load(self):
-    instances = self.KINDS[self.task](self.split, self.gpv_split,self.split_txt)
+    instances = self.KINDS[self.task](self.split, self.gpv_split,self.split_txt,self.raw_instances)
     if self.per_example_captions and self.task == Task.CAPTIONING:
       per_ex = []
       for instance in instances:

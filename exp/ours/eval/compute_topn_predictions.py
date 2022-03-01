@@ -388,7 +388,7 @@ def main():
 
   if args.output_dir and args.output_name:
     raise ValueError("Cannot specify output_name and output_dir")
-  model_to_eval = 'outputs/auto_select/good_lessons_only/epoch_6_lesson_0'
+  model_to_eval = 'outputs/good_lessons_only_new_lesson_format/best_model'
   models = our_utils.find_models(model_to_eval)
   print(models)
   # if len(models) == 0:

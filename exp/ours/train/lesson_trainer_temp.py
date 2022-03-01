@@ -636,6 +636,8 @@ class Trainer(FromParams):
     mil_examples = []
     for lesson in all_train:
 
+       
+
        if lesson[0].task == Task.SYNONYM:
         new_all_train = []
         for i in range(0,len(lesson),2):
@@ -713,6 +715,13 @@ class Trainer(FromParams):
             #   print('loader 0')
             #   pdb.set_trace()
             total_lesson_datasets.append(loader)
+       elif lesson[0].task == Task.DETECTION:
+          new_all_train = []
+          for i in range(len(lesson)):
+            new_all_train.append(lesson[i])
+          global_all_train.append(new_all_train)
+
+
 
     # if not self.lesson_training:
     #   for grp in training_examples:

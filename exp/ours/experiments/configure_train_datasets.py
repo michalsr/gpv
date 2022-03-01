@@ -1,12 +1,25 @@
 from typing import Type
+from exp.ours.data.dataset import GPV1_TASKS, GPV2_TASKS, Task
 from exp.ours.train.lesson_trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
 from exp.ours.data.image_contrast import ImageContrastDataset
 from exp.ours.data.text_contrast import TextContrastDataset
 from exp.ours.data.synonym import SynonymDataset 
+from exp.ours.data.gpv import GpvDataset, CocoCategories
+from exp.ours.data.dataset import *
 from exp.ours.data.mil import MILDataset
 import random 
 import numpy as np 
 import utils.io as io 
+from os.path import join, dirname
+from utils.io import load_json_object
+def get_coco_categories():
+  coco_file = '/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json'
+  return load_json_object(coco_file)
+
+
+COCO_ID_TO_CATEGORY = {x["id"]: x["name"] for x in get_coco_categories()}
+COCO_CATEGORIES = list(COCO_ID_TO_CATEGORY.values())
+COCO_CATEGORIES_TO_ID = {k: i for i, k in enumerate(COCO_CATEGORIES)}
 CONTRAST_GROUP = 0
 ID = 0 
 UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse', 
@@ -17,17 +30,24 @@ UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse',
 def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,lesson_datasets,combine_same_lesson=False):
     training_datasets = []
     lesson_names = {'image_contrast':convert_to_contrast,'text_contrast':convert_to_text_contrast,'synonym':convert_to_synonym,
-    'mil':convert_to_mil}
+    'mil':convert_to_mil,'coco':convert_to_det}
     lesson_datasets = {'image_contrast':ImageContrastDataset, "text_contrast":TextContrastDataset,"mil":MILDataset,
-    'synonym':SynonymDataset}
+    'synonym':SynonymDataset,'coco':GpvDataset}
+    coco_loc_data = '/data/michal5/gpv/learning_phase_data/coco_detection/seen_only/train.json'
 
-    lesson_count = {'image_contrast':0,'text_contrast':0,'mil':0,'synonym':0}
+    lesson_count = {'image_contrast':0,'text_contrast':0,'mil':0,'synonym':0,'coco':0}
     num_split = len(data)/batch_size
+    #if coco data is used then not all of new data will be used 
     new_data = np.split(np.array(data),num_split)
-    print(type(new_data))
+
     assert len(new_data) >= len(sampled_lessons)
     for i in sampled_lessons:
         lesson_count[map_int_to_lesson[i]] += 1
+    coco_data = np.array(io.load_json_object(coco_loc_data))
+    final_index = lesson_count['coco']*batch_size
+    assert final_index <= len(coco_data)
+    coco_split = int(len(coco_data)/batch_size)
+    coco_data_split = np.split(coco_data,coco_split)
   
     
     num_start = 0 
@@ -47,15 +67,30 @@ def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,l
     #             training_datasets.append(TrainerDataset(final_dataset,l))
     # else:
     random.shuffle(new_data)
+    next_coco_val = 0
     id_value = 0
     contrast_group = 0
     for i,lesson in enumerate(sampled_lessons):
-        lesson_data = new_data[i]
+        if map_int_to_lesson[lesson] == 'coco':
+            if next_coco_val <= len(coco_data_split):
+                coco_ind = next_coco_val
+                next_coco_val += 1
+            
+            else:
+                coco_ind = 0
+                next_coco_val = 1
+
+            data = coco_data_split[coco_ind].tolist()
+           
+            training_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION,"train",raw_instances=data),'det'))
+
+        else:
+            lesson_data = new_data[i]
 
   
-        final_data,contrast_group,id_value = lesson_names[map_int_to_lesson[lesson]](lesson_data,contrast_group,id_value)
-        final_dataset = lesson_datasets[map_int_to_lesson[lesson]](split='train',raw_instances=final_data)
-        training_datasets.append(TrainerDataset(final_dataset,map_int_to_lesson[lesson]))
+            final_data,contrast_group,id_value = lesson_names[map_int_to_lesson[lesson]](lesson_data,contrast_group,id_value)
+            final_dataset = lesson_datasets[map_int_to_lesson[lesson]](split='train',raw_instances=final_data)
+            training_datasets.append(TrainerDataset(final_dataset,map_int_to_lesson[lesson]))
     return training_datasets
 
 
@@ -91,7 +126,6 @@ def convert_to_contrast(sampled_data,contrast_group,id_value):
     contrast_group += 1 
     return final_data, contrast_group, id_value  
     
-
 
 
 
@@ -165,7 +199,7 @@ def convert_to_synonym(sampled_data,contrast_group,id_value):
     coco_to_super = {}
     global_id = 0
     #map coco category to super catogorey 
-    coco_list = io.load_json_object(f'/home/michal/gpv_michal/exp/ours/data/coco_categories.json')
+    coco_list = io.load_json_object(f'/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json')
     for c in coco_list:
         if c['name'] not in coco_to_super:
             if c['name'] in UNSEEN_COMBINED:
@@ -253,3 +287,27 @@ def convert_to_mil(sampled_data,contrast_group,id_value):
 
 
 
+def convert_to_det(raw_instances):
+    out = []
+    for x in raw_instances:
+        if "coco_categories" in x:
+            cats = x["coco_categories"]
+            meta = {
+                "gpv1-seen": cats["seen"],
+                "gpv1-unseen": cats["unseen"],
+                "gpv1-query": x["query"],
+                "gpv1-id": x["id"]
+            }
+        else:
+            meta = {
+                "gpv1-query": x["query"],
+                "gpv1-id": x["id"]
+            }
+        image_id = x["image"]["image_id"]
+        cat_id = x["category_id"]
+        gpv_id = f"coco-boxes{image_id}-cat{cat_id}"
+        bbox = LocalizationExample(
+        gpv_id, x["image"]["image_id"], np.array(x["boxes"]),
+        COCO_ID_TO_CATEGORY[cat_id], meta)
+        out.append(bbox)
+    return out

@@ -87,27 +87,29 @@ CAPTION_QUERIES = [
   'Generate a description for the image.',
 ]
 
+# BBOX_QUERIES = [
+#   'Locate {}.',
+#   'Locate {} in the image.',
+#   'Locate {} in this image.',
+#   'Locate instances of {}.',
+#   'Locate instances of {} in the image.',
+#   'Locate instances of {} in this image.',
+#   'Locate all instances of {}.',
+#   'Locate all instances of {} in the image.',
+#   'Locate all instances of {} in this image.',
+#   'Find {}.',
+#   'Find {} in the image.',
+#   'Find {} in this image.',
+#   'Find instances of {}.',
+#   'Find instances of {} in the image.',
+#   'Find instances of {} in this image.',
+#   'Find all instances of {}.',
+#   'Find all instances of {} in the image.',
+#   'Find all instances of {} in this image.',
+# ]
 BBOX_QUERIES = [
-  'Locate {}.',
-  'Locate {} in the image.',
-  'Locate {} in this image.',
-  'Locate instances of {}.',
-  'Locate instances of {} in the image.',
-  'Locate instances of {} in this image.',
-  'Locate all instances of {}.',
-  'Locate all instances of {} in the image.',
-  'Locate all instances of {} in this image.',
-  'Find {}.',
-  'Find {} in the image.',
-  'Find {} in this image.',
-  'Find instances of {}.',
-  'Find instances of {} in the image.',
-  'Find instances of {} in this image.',
-  'Find all instances of {}.',
-  'Find all instances of {} in the image.',
-  'Find all instances of {} in this image.',
+  'Localize the {}'
 ]
-
 SEGMENTATION_QUERIES = [
   'Segment {}.',
   'Segment {} in the image.',
