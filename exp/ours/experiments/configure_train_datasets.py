@@ -45,7 +45,7 @@ def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,l
         lesson_count[map_int_to_lesson[i]] += 1
     if lesson_count['coco'] >0:
         coco_data = np.array(io.load_json_object(coco_loc_data))
-        final_index = lesson_count['coco']*batch_size
+        final_index = lesson_count['coco']*(batch_size/2)
 
         assert final_index <= len(coco_data)
         coco_split = int(len(coco_data)/batch_size)

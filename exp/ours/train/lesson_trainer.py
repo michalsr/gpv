@@ -873,7 +873,7 @@ class Trainer(FromParams):
     logging.info(f'Total number of examples {total_num_examples}')
   
 
-    sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(global_all_train))),batch_size=1,drop_last=True)
+    sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(global_all_train))),batch_size=2,drop_last=True)
     # samples = [x.train_sample for x in self.train_datasets]
     # sampler = StratifiedSubsetSampler(
     # all_train_sizes, runtime.seed, self.stratify, samples, 15, None, None)
