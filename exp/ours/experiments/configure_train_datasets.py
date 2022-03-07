@@ -13,7 +13,7 @@ import utils.io as io
 from os.path import join, dirname
 from utils.io import load_json_object
 def get_coco_categories():
-  coco_file = '/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json'
+  coco_file = '/home/michal/gpv_michal/exp/ours/data/coco_categories.json'
   return load_json_object(coco_file)
 
 
@@ -22,6 +22,7 @@ COCO_CATEGORIES = list(COCO_ID_TO_CATEGORY.values())
 COCO_CATEGORIES_TO_ID = {k: i for i, k in enumerate(COCO_CATEGORIES)}
 CONTRAST_GROUP = 0
 ID = 0 
+SYN_ID = 0
 UNSEEN_COMBINED = ['bed', 'bench', 'book', 'cell phone', 'horse', 
              'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
              'hot dog', 'keyboard', 'laptop', 'train', 'tv']
@@ -49,7 +50,8 @@ def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,l
 
         assert final_index <= len(coco_data)
         coco_split = int(len(coco_data)/batch_size)
-        coco_data_split = np.split(coco_data[:final_index],lesson_count['coco'])
+        print(lesson_count['coco'])
+        coco_data_split = np.split(coco_data[:int(final_index)],lesson_count['coco'])
   
     
     num_start = 0 
@@ -72,6 +74,7 @@ def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,l
     next_coco_val = 0
     id_value = 0
     contrast_group = 0
+    syn_id = 0
     for i,lesson in enumerate(sampled_lessons):
         if map_int_to_lesson[lesson] == 'coco':
             if next_coco_val <= len(coco_data_split):
@@ -90,14 +93,14 @@ def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,l
             lesson_data = new_data[i]
 
   
-            final_data,contrast_group,id_value = lesson_names[map_int_to_lesson[lesson]](lesson_data,contrast_group,id_value)
+            final_data,contrast_group,id_value,syn_id = lesson_names[map_int_to_lesson[lesson]](lesson_data,contrast_group,id_value,syn_id)
             final_dataset = lesson_datasets[map_int_to_lesson[lesson]](split='train',raw_instances=final_data)
             training_datasets.append(TrainerDataset(final_dataset,map_int_to_lesson[lesson]))
     return training_datasets
 
 
 
-def convert_to_contrast(sampled_data,contrast_group,id_value):
+def convert_to_contrast(sampled_data,contrast_group,id_value,syn_id):
     final_data = []
     correct_index = np.random.choice(len(sampled_data))
     correct_class = sampled_data[correct_index][0]
@@ -126,7 +129,7 @@ def convert_to_contrast(sampled_data,contrast_group,id_value):
         id_value += 1
         final_data.append(sample_entry)
     contrast_group += 1 
-    return final_data, contrast_group, id_value  
+    return final_data, contrast_group, id_value, syn_id 
     
 
 
@@ -134,7 +137,7 @@ def convert_to_contrast(sampled_data,contrast_group,id_value):
 
 
 
-def convert_to_image_contrast(sampled_data,batch_size):
+def convert_to_image_contrast(sampled_data,batch_size,syn_id):
     image_list = []
     
     final_data_list = []
@@ -196,17 +199,19 @@ def convert_to_text_contrast(sampled_data):
     if len(final_data_list) == 0:
         raise TypeError
     return final_data_list
-def convert_to_synonym(sampled_data,contrast_group,id_value):
+def convert_to_synonym(sampled_data,contrast_group,id_value,syn_id):
     synonym_data = []
     coco_to_super = {}
     global_id = 0
+  
     #map coco category to super catogorey 
-    coco_list = io.load_json_object(f'/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json')
+    coco_list = io.load_json_object(f'/home/michal/gpv_michal/exp/ours/data/coco_categories.json')
     for c in coco_list:
         if c['name'] not in coco_to_super:
             if c['name'] in UNSEEN_COMBINED:
                 coco_to_super[c['name']] = c['supercategory']
     for data_entry in sampled_data:
+        syn_id += 1
         data_entry = data_entry.tolist()
         if len(data_entry)>1:
             coco_class = data_entry[0]
@@ -219,6 +224,8 @@ def convert_to_synonym(sampled_data,contrast_group,id_value):
     
             entry_1['boxes'] = [0.0,0.0,1.0,1.0]
             entry_1['rel_query'] = coco_class
+            entry_1['syn_id'] = syn_id
+
             
             entry_1['gpv_id'] = f"synonym-{str(coco_class)}-{str(img)}-{str(id_value)}"
             id_value += 1
@@ -233,16 +240,19 @@ def convert_to_synonym(sampled_data,contrast_group,id_value):
     
             entry_1['answer'] = entry_2['gpv_id']
             entry_2['answer'] = entry_1['gpv_id']
+            entry_2['syn_id'] = syn_id
             synonym_data.append(entry_1)
             synonym_data.append(entry_2)
+            syn_id += 1
+     
 
     if len(synonym_data) == 0:
         raise TypeError 
-    return synonym_data,contrast_group,id_value
+    return synonym_data,contrast_group,id_value,syn_id
         
 
 
-def convert_to_mil(sampled_data,contrast_group,id_value):
+def convert_to_mil(sampled_data,contrast_group,id_value,syn_id):
     final_data = []
     #print(sampled_data)
     id_begin = 0
@@ -285,7 +295,7 @@ def convert_to_mil(sampled_data,contrast_group,id_value):
 
     if len(final_data) ==0:
         raise TypeError
-    return final_data,contrast_group,id_value
+    return final_data,contrast_group,id_value,syn_id
 
 
 

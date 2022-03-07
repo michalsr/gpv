@@ -28,6 +28,9 @@ class GpvBatchLabels:
   mil_labels: List
   segmentation_labels: List
   index_of_class: str
+  syn_id: List
+  image_ids: List
+  queries: List
 
   # support `to` and `pin_memory` so this object can be used in a torch.DataLoader
   def to(self, device):
@@ -283,21 +286,27 @@ class BasicGPVLoss(GPVLoss):
       return loss 
   def syn_loss(self,logits_1,logits_2):
       #Size is Bxnum_boxesxrelevance scores
-      
-      logits_1 = logits_1[:,:,0]
-      logits_2 = logits_2[:,:,0]
+      print(logits_1.size())
+      logits_1 = logits_1[:,0]
+      print(logits_1.size(),'logits 1')
+      logits_2 = logits_2[:,0]
+      print(logits_2.size(),'logits 2')
       #print(logits_2.size(),'logits')
-      max_logits,ind = torch.max(logits_2,dim=(1))
+      logits_2 = logits_2.unsqueeze(1)
+      print(logits_2.size())
+      ind = torch.max(logits_2.unsqueeze(1))
       values = torch.zeros(logits_2.size())
       #print(values.size())
       #better way to do this 
-      for i in range(values.size()[0]):
-        values[i,ind[i]] = 1
+      values[int(ind.item())] = 1
       # values[0,ind[0]] = 1
       # values[1,ind[1]] = 1
       values = torch.FloatTensor(values).to("cuda:0")
+      #logits_1 = torch.FloatTensor(logits_1[int(ind.item())]).to("cuda:0")
+
+     
       #print(logits_1.device)
-      loss = F.binary_cross_entropy_with_logits(logits_1,values)
+      loss = F.binary_cross_entropy_with_logits(logits_1[int(ind.item())],values[int(ind.item())].squeeze())
       return loss 
 
       # print(values,'values')
@@ -318,7 +327,7 @@ class BasicGPVLoss(GPVLoss):
     for task, ix_lst in task_to_ix.items() :
       print(task==Task.TEXTCONTRAST,'task')
       
-      pdb.set_trace()
+      
       ixs = torch.as_tensor(ix_lst, device=labels.device, dtype=torch.long)
       n_boxes = prediction.n_boxes
       if task == Task.DETECTION:
@@ -329,12 +338,23 @@ class BasicGPVLoss(GPVLoss):
         losses.update(log)
         task_loss = total
       elif task == Task.SYNONYM:
-        #print(prediction.pred_rel.size(),'size')
-        ix_1 = torch.as_tensor([j for j in ix_lst if j%2 ==0],device=labels.device,dtype=torch.long)
-        ix_2 = torch.as_tensor([j for j in ix_lst if j%2 ==1],device=labels.device,dtype=torch.long)
-        loss = self.syn_loss(prediction.pred_rel[ix_1],prediction.pred_rel[ix_2])
-        losses[str(task) + "-loss"] = loss
-        task_loss = loss
+
+        total_loss = torch.zeros(1).cuda()
+        diff_indicies = {}
+  
+        for ind in ixs:
+          if batch_labels.syn_id[ind] != None:
+            if batch_labels.syn_id[ind] not in diff_indicies:
+              diff_indicies[batch_labels.syn_id[ind]] = []
+            diff_indicies[batch_labels.syn_id[ind]].append(ind.item())
+        for k in diff_indicies:
+          id_0,id_1 = diff_indicies[k]
+          loss = self.syn_loss(prediction.pred_rel[id_0],prediction.pred_rel[id_1])
+    
+          total_loss = torch.add(total_loss,loss)
+        total_loss = torch.div(total_loss,len(diff_indicies))
+        losses[str(task) + "-loss"] = total_loss
+        task_loss = total_loss
       elif task == Task.MIL:
         loss = self.mil(prediction.pred_rel[ixs],batch_labels.mil_labels)
         losses[str(task) + "-loss"] = loss 
@@ -383,6 +403,7 @@ class BasicGPVLoss(GPVLoss):
         for k in diff_indicies:
           loss = self.image_contrastive_loss(prediction.pred_rel[diff_indicies[k],:,:],k)
           total_loss = torch.add(total_loss,loss)
+        total_loss = torch.div(total_loss,len(diff_indicies))
         #print(prediction.pred_rel[ixs],'relative predition')\
         # get_labels = []
         # for l in batch_labels.index_of_class:

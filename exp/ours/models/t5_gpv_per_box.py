@@ -1,7 +1,7 @@
 from copy import Error
 import logging
 from typing import Union, Tuple, Dict, Optional, Callable, List
-
+import os
 import torch
 import torchvision.ops
 from allennlp.common import Params
@@ -28,6 +28,7 @@ from exp.ours.util.nlp_utils import encode_with_cache, t5_initialize_decoding
 from torch import nn
 from torch.nn import functional as F
 from exp.ours.util.to_params import to_params
+import utils.io as io 
 
 
 @dataclass
@@ -579,6 +580,7 @@ class T5GpvPerBox(GPVModel):
       labels=labels.text_labels,
       return_dict=True,
     )
+  
     #print(labels.text_labels,'text labels')
     #print('Computed out')
     if not self.predict_trailing_pad_tokens:
@@ -590,13 +592,25 @@ class T5GpvPerBox(GPVModel):
     n_boxes = image_features.n_boxes
     #print(rel.size(),'relevance size')
     #print(len(t5_out.logits),'t5 logits')
+    #print(boxes,rel,'boxes rel')
+    
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
+    print(batch_pred.logits.size(),'batch pred logits')
+    print(batch_pred.pred_boxes.size(),'pred boxe sizez')
+    print(batch_pred.pred_rel.size(),'pred rel size')
+    print(len(labels.image_ids),'images ')
+    json_dump = {'pred_boxes':batch_pred.pred_boxes.detach().cpu().numpy(),'rel':batch_pred.pred_rel.cpu().detach().numpy(),
+    'images':labels.image_ids,'queries':labels.queries}
+    if not os.path.exists('/home/michal/gpv_michal/syn_values.json'):
+      io.dump_json_object(json_dump,'/home/michal/gpv_michal/syn_values.json')
+    
+
     #print('Computed batch pred')
     #print(rel,'batch pred')
     #print(batch_pred,'batch pred')
     loss, monitor = self.loss(batch_pred, labels)
     #print('Computed loss')
-    return loss, monitor
+    return loss, monitor,json_dump
 
 
   def set_prediction_args(

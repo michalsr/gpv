@@ -62,18 +62,24 @@ class CollateWithTokenizer(Callable):
   other_collate: Any = None
 
   def __call__(self, batch):
-    queries = []
+    query_save = []
     answers = []
     indicies = []
     mil_answers = []
+    queries = []
+    syn_ids = []
     new_batch = []
+    image_ids = []
     for b in batch:
+ 
       if type(b) == list:
         for element in b:
+      
           new_batch.append(element)
       else:
         new_batch.append(b)
     batch = new_batch
+
     #print(batch,'batch')
     #print('hello')
     #print(type(batch[0]),'batch type')
@@ -134,15 +140,25 @@ class CollateWithTokenizer(Callable):
     
     for ex in batch:
 
-
-      
       # print(ex.image_id,'image id')
       # print(ex.index_of_class,'index of class')
       #print(ex.target_answer,'target answer')
+      query_save.append(ex.relevance_query)
+      image_ids.append(ex.image_id)
       if ex.correct_answer!= None:
         mil_answers.append(ex.correct_answer)
       #print('Appended indicies')
-      indicies.append(ex.index_of_class)
+      if ex.task == Task.SYNONYM:
+        syn_ids.append(ex.syn_id)
+      else:
+        syn_ids.append(None)
+ 
+
+      if ex.task == Task.IMAGECONTRAST:
+
+        indicies.append(ex.index_of_class)
+      else:
+        indicies.append(None)
       q = ex.query[np.random.randint(0, len(ex.query))]
       #print(ex.target_answer == None,'target answer')
       #print(ex.target_answer,'taget answer')
@@ -170,6 +186,7 @@ class CollateWithTokenizer(Callable):
     image_data = self.image_collater.collate(batch)
     #print('Collated image data')
     image_inputs, box_targets = image_data
+
     #print(len(box_targets),'box targets')
     #print(image_inputs.size(),'image inputs size')
     if self.pre_tokenized:
@@ -193,7 +210,7 @@ class CollateWithTokenizer(Callable):
       [x.task for x in batch],
       answers["input_ids"],
       box_targets,
-      segmentation_labels=segmentation_labels,index_of_class=indicies,mil_labels=mil_answers
+      segmentation_labels=segmentation_labels,index_of_class=indicies,mil_labels=mil_answers,syn_id=syn_ids,image_ids=image_ids,queries=query_save
     )
     #print('Gathered labels')
     #print(labels.index_of_class,'index of class collate')

@@ -366,8 +366,11 @@ class AutoTask(FromParams):
         self.auto_logger.info("Initialization complete")
         self.save()
       self.auto_logger.info(f'Epoch:{e}')
-      single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/full_localization_data_3.json')
-      data = self.modify_localization_data(single_image_data)
+      single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/small_num_localization_lessons.json')
+      single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/small_num_localization_lessons.json')
+      
+      data = single_image_data
+      print(len(data))
       total_data = len(data)
       random.shuffle(data)
       for j in range(self.start_trajec,self.num_trajec):
@@ -469,7 +472,7 @@ def main():
   parser.add_argument("--num_trajec",type=str,default=None)
   parser.add_argument("--outer_epochs",type=str,default=None)
   parser.add_argument("--batch_eval",type=str,default=None)
-  
+  parser.add_argument("--vis_eval",type=str,default=None)
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
