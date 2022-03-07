@@ -60,6 +60,8 @@ class GPVExample:
 
   correct_answer: Optional[str] = None
 
+  syn_id: Optional[int] = None
+
   meta: Any = None
 
   def get_gpv_id(self):
