@@ -28,6 +28,7 @@ from exp.ours.util.nlp_utils import encode_with_cache, t5_initialize_decoding
 from torch import nn
 from torch.nn import functional as F
 from exp.ours.util.to_params import to_params
+import utils.io as io 
 
 
 @dataclass
@@ -579,6 +580,7 @@ class T5GpvPerBox(GPVModel):
       labels=labels.text_labels,
       return_dict=True,
     )
+  
     #print(labels.text_labels,'text labels')
     #print('Computed out')
     if not self.predict_trailing_pad_tokens:
@@ -590,7 +592,14 @@ class T5GpvPerBox(GPVModel):
     n_boxes = image_features.n_boxes
     #print(rel.size(),'relevance size')
     #print(len(t5_out.logits),'t5 logits')
+    #print(boxes,rel,'boxes rel')
+    
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
+    json_dump = {'logits':batch_pred.logits,'pred_boxes':batch_pred.pred_boxes,'rel':batch_pred.pred_rel,
+    'images':labels.image_ids}
+    io.dump_json_object(json_dump,'/home/michal5/gpv_michal/syn_values.json')
+    
+
     #print('Computed batch pred')
     #print(rel,'batch pred')
     #print(batch_pred,'batch pred')

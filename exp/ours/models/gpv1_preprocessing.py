@@ -253,7 +253,7 @@ class Gpv1Preprocessor(FromParams):
         answer = self.preprocess_text(str(example.answer))
         
         out = [GPVExample(example.gpv_id,example.task,example.image_id,query=[self.preprocess_text(example.query)],
-        target_answer=answer,correct_answer=None,index_of_class=None,relevance_query=example.rel_query)]
+        target_answer=answer,correct_answer=None,index_of_class=None,relevance_query=example.rel_query,syn_id=example.syn_id)]
        
     elif isinstance(example,MILExample):
 

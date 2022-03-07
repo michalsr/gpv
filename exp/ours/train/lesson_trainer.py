@@ -646,8 +646,8 @@ class Trainer(FromParams):
           syn_examples.append([lesson[i],lesson[i+1]])
           new_all_train.append([lesson[i],lesson[i+1]])
           global_all_train.append([lesson[i],lesson[i+1]])
-        if len(new_all_train) <4:
-          raise TypeError
+        # if len(new_all_train) <4:
+        #   raise TypeError
         total_num_examples += len(new_all_train)
         sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(new_all_train))),batch_size=4,drop_last=True)
         loader = self.train_loader.build(new_all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
@@ -1307,12 +1307,12 @@ class Trainer(FromParams):
     loss_ema = train_state.loss_ema
 
     # Do initial eval if asked
-    if self.actual_epoch ==0:
-      eval_dir = self._get_train_eval_dir(run_dir, 0, 0)
-      results = self._run_eval(_base_model, eval_runners, 0, runtime.seed, eval_dir)
-      for k in results:
-        print('unseen' in str(k))
-        logging.info(f'Initial evaluation score for {k} is {results[k]}')
+    # if self.actual_epoch ==0:
+    #   eval_dir = self._get_train_eval_dir(run_dir, 0, 0)
+    #   results = self._run_eval(_base_model, eval_runners, 0, runtime.seed, eval_dir)
+    #   for k in results:
+    #     print('unseen' in str(k))
+    #     logging.info(f'Initial evaluation score for {k} is {results[k]}')
      
     if self.eval_at_start and global_step == 0:
       logging.info("Starting initial eval")
@@ -1343,6 +1343,7 @@ class Trainer(FromParams):
       model.train()
       pbar = tqdm(train_loader,disable=not self.epoch_pbar,ncols=100,desc='loss=',total=len(train_loader))
       for i,batch in enumerate(pbar):
+          #pdb.set_trace()
 
           batch = our_utils.to_device(batch, device)
           
@@ -1359,6 +1360,8 @@ class Trainer(FromParams):
           # for group in optimizer.param_groups:
           #   for p in group['params']:
           #     print(p.grad)
+          if i == 1:
+            break
           if self.batch_eval == True:
             if i!=0 and i%100 == 0:
               eval_dir = self._get_train_eval_dir(run_dir, epoch, global_step)

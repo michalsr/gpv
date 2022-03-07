@@ -28,6 +28,7 @@ class SynonymExample:
   query: str  
   rel_query: str
   answer: str
+  syn_id: int
 
 
 
@@ -84,7 +85,7 @@ def load_synonym(split=None,raw_instances=None):
     else:
       image_id = ex["image"]
    
-    ex= SynonymExample(gpv_id=ex["gpv_id"],image_id=image_id,query=ex['query'],answer=ex['answer'],rel_query=ex['rel_query'])
+    ex= SynonymExample(gpv_id=ex["gpv_id"],image_id=image_id,query=ex['query'],answer=ex['answer'],rel_query=ex['rel_query'],syn_id=ex['syn_id'])
     out.append(ex)
     
   return out
