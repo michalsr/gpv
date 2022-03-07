@@ -348,7 +348,7 @@ class AutoTask(FromParams):
     for entry in loc_data:
       for i in range(len(self.lessons)):
         new_entries.append(entry)
-    return new_entries
+    return loc_data
      
   def run(self):
     print(self.start_epoch,'start epoch')
@@ -372,7 +372,8 @@ class AutoTask(FromParams):
       data = single_image_data
       print(len(data))
       total_data = len(data)
-      random.shuffle(data)
+   
+      #random.shuffle(data)
       for j in range(self.start_trajec,self.num_trajec):
       
         self.auto_logger.info(f'Trajectory:{j}')

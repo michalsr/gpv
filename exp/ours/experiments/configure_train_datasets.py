@@ -13,7 +13,11 @@ import utils.io as io
 from os.path import join, dirname
 from utils.io import load_json_object
 def get_coco_categories():
+<<<<<<< HEAD
   coco_file = '/home/michal/gpv_michal/exp/ours/data/coco_categories.json'
+=======
+  coco_file = '/home/michal5/gpv_michal/exp/ours/data/coco_categories.json'
+>>>>>>> dce51b280c53a45b2f2328e0ab3a00dbda49f370
   return load_json_object(coco_file)
 
 

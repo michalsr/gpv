@@ -675,14 +675,14 @@ class T5GpvPerBox(GPVModel):
         self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
-      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels, relevance_queries=None):
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels, relevance_queries=None,json_output=False):
     # Use no_grad just so clients don't have to remember to
     with torch.no_grad():
-      return self._predict(image_inputs, input_ids, input_mask, labels, relevance_queries)
+      return self._predict(image_inputs, input_ids, input_mask, labels, relevance_queries,json_output)
 
   def _predict(
       self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
-      relevance_queries=None
+      relevance_queries=None,json_output=False
   ):
     task = labels.tasks[0]
     if not all(x == task for x in labels.tasks):
