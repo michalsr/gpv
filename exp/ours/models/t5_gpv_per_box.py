@@ -589,28 +589,10 @@ class T5GpvPerBox(GPVModel):
         labels.text_labels == self.tokenizer.pad_token_id, -100)
 
     boxes = image_features.boxes
-    n_boxes = image_features.n_boxes
-    #print(rel.size(),'relevance size')
-    #print(len(t5_out.logits),'t5 logits')
-    #print(boxes,rel,'boxes rel')
-    
+    n_boxes = image_features.n_boxes    
     batch_pred = GpvBatchPrediction(t5_out.logits, boxes, rel, n_boxes)
-    print(batch_pred.logits.size(),'batch pred logits')
-    print(batch_pred.pred_boxes.size(),'pred boxe sizez')
-    print(batch_pred.pred_rel.size(),'pred rel size')
-    print(len(labels.image_ids),'images ')
-    json_dump = {'pred_boxes':batch_pred.pred_boxes.detach().cpu().numpy(),'rel':batch_pred.pred_rel.cpu().detach().numpy(),
-    'images':labels.image_ids,'queries':labels.queries}
-    if not os.path.exists('/home/michal/gpv_michal/syn_values.json'):
-      io.dump_json_object(json_dump,'/home/michal/gpv_michal/syn_values.json')
-    
-
-    #print('Computed batch pred')
-    #print(rel,'batch pred')
-    #print(batch_pred,'batch pred')
     loss, monitor = self.loss(batch_pred, labels)
-    #print('Computed loss')
-    return loss, monitor,json_dump
+    return loss, monitor
 
 
   def set_prediction_args(
@@ -675,30 +657,26 @@ class T5GpvPerBox(GPVModel):
         self.register_buffer("mask", answer_mask, persistent=False)
 
   def predict(
-      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels, relevance_queries=None,json_output=False):
+      self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels, relevance_queries=None,json_output=None):
     # Use no_grad just so clients don't have to remember to
     with torch.no_grad():
       return self._predict(image_inputs, input_ids, input_mask, labels, relevance_queries,json_output)
 
   def _predict(
       self, image_inputs, input_ids, input_mask, labels: GpvBatchLabels,
-      relevance_queries=None,json_output=False
+      relevance_queries=None,json_output=None
   ):
     task = labels.tasks[0]
     if not all(x == task for x in labels.tasks):
       raise NotImplementedError("Predict requires all examples have the same batch")
-    #print(task,'TASK')
+  
     encoder_outputs, input_mask, image_features = self._encode(image_inputs, input_ids, input_mask)
     if task == (Task.DETECTION or Task.IMAGECONTRAST or Task.TEXTCONTRAST or Task.SYNONYM or Task.MIL):
-      #print('hi using this')
+      
       per_box_scores = self.compute_per_box_score(
         labels.tasks, encoder_outputs.last_hidden_state,
         image_features.get_n_boxes(), relevance_queries, input_mask, True)
-      #print(per_box_scores,'per box scores for prediction')
-      #print(per_box_scores.size(),'per box scores size for prediction')
       rel = self._image_rel(image_features, per_box_scores, encoder_outputs.last_hidden_state)
-      #print(rel.size(),'final image rel for prediction')
-      #print(rel,'rel')
       rel = rel.softmax(-1)[:, :, 0]
     else:
       if len(image_features.objectness.size()) == 3:
@@ -766,9 +744,10 @@ class T5GpvPerBox(GPVModel):
         to_subtract = torch.full_like(rel[i], 10000)
         to_subtract[keep] = 0
         rel[i] -= to_subtract
-    #print(rel.size(),'rel last line')
     return build_per_example_output(
-      out_text, logprobs, image_features.boxes, rel, image_features.n_boxes)
+      out_text, logprobs, image_features.boxes, rel,labels.image_ids,labels.queries,n_boxes=image_features.n_boxes)
+  
 
+  
   def post_process_generation(self, generated_ids):
     return self.tokenizer.decode(generated_ids, skip_special_tokens=True)

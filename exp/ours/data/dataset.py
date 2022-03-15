@@ -128,6 +128,7 @@ class LocalizationExample:
   bboxes: np.ndarray
   category: str
   meta: Optional[Dict] = None
+  query: Optional[str] = None
 
   @property
   def crop(self):

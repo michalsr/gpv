@@ -154,7 +154,7 @@ class Gpv1Preprocessor(FromParams):
     self.cls_queries_tok = [preprocess_text(x) for x in cls]
     self.caption_queries_tok = [preprocess_text(x) for x in CAPTION_QUERIES]
 
-  def preprocess_example(self, example, is_train=False, include_query_box=False, include_meta=False):
+  def preprocess_example(self, example, is_train=False, include_query_box=False, include_meta=True):
     if include_query_box:
       default_query_box = np.array([[0.0, 0.0, 1.0, 1.0]])
     else:
@@ -309,12 +309,16 @@ class Gpv1Preprocessor(FromParams):
         rel_query = "relevant"
       else:
         raise NotImplementedError(self.relevance_query)
-
+      if example.query != None:
+        question = [self.preprocess_text(example.query)]
+      else:
+        question = [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES]
+      
       out = [GPVExample(
         example.gpv_id,
         Task.DETECTION,
         example.image_id,
-        [self.preprocess_text(x.format(example.category)) for x in BBOX_QUERIES],
+        question,
         example.bboxes,
         relevance_query=rel_query,
         query_boxes=default_query_box,

@@ -235,3 +235,6 @@ def get_trainer_from_args(
 def run_trainer_from_args(trainer, model, args):
   devices = RunArgs.build(get_devices(args.device), args.force_one_worker, args.grad_accumulation)
   trainer.train(model, args.output_dir, devices, override=args.override)
+def run_eval_from_args(trainer, model, args):
+  devices = RunArgs.build(get_devices(args.device), args.force_one_worker, args.grad_accumulation)
+  trainer.predict(model, args.output_dir, devices, override=args.override)

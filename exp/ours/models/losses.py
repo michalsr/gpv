@@ -294,7 +294,8 @@ class BasicGPVLoss(GPVLoss):
       #print(logits_2.size(),'logits')
       logits_2 = logits_2.unsqueeze(1)
       print(logits_2.size())
-      ind = torch.max(logits_2.unsqueeze(1))
+      ind = torch.argmax(logits_2.unsqueeze(1))
+      print(ind,'ind')
       values = torch.zeros(logits_2.size())
       #print(values.size())
       #better way to do this 

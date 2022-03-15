@@ -21,6 +21,7 @@ COCO_CATEGORIES = list(COCO_ID_TO_CATEGORY.values())
 COCO_CATEGORIES_TO_ID = {k: i for i, k in enumerate(COCO_CATEGORIES)}
 
 
+
 def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> List[Dict]:
   """Loads GPV-I in list-of-dictionary format"""
 
@@ -74,9 +75,18 @@ def load_gpv_boxes(split, gpv_split,split_txt,raw_instances=None) -> List[Locali
     image_id = x["image"]["image_id"]
     cat_id = x["category_id"]
     gpv_id = f"coco-boxes{image_id}-cat{cat_id}"
+    if 'category_name' in x:
+      name = x['category_name']
+    else:
+      name =   COCO_ID_TO_CATEGORY[cat_id]
+    if 'query' in x:
+      q = x['query']
+      meta['query'] = x['query']
+    else:
+      q= None
     bbox = LocalizationExample(
       gpv_id, x["image"]["image_id"], np.array(x["boxes"]),
-      COCO_ID_TO_CATEGORY[cat_id], meta)
+      name, meta,query=q)
     out.append(bbox)
   return out
 

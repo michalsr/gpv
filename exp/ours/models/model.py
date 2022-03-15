@@ -7,10 +7,10 @@ from allennlp.common import Registrable
 from allennlp.nn.beam_search import StepFunctionType, StateType
 from dataclasses import dataclass
 from torch import nn
-
+import utils.io as io
 from exp.ours.data.gpv_example import GPVExample
 from exp.ours.data.dataset import Task
-
+import os 
 
 @dataclass
 class GPVExampleOutput:
@@ -27,6 +27,9 @@ class GPVExampleOutput:
 
   text_logprobs: Optional[List[float]]
   """score of each text answer"""
+  image_ids: Optional[List]
+  queries: Optional[List]
+
 
   def set_beams_to_keep(self, n):
     if self.text is None:
@@ -90,10 +93,20 @@ class GPVModel(nn.Module, Registrable):
     """Convert an eval example for a task into a universal/pre-processed format"""
     raise NotImplementedError()
 
+def convert_to_total_output(gpv_examples):
+    total_output = {'pred_boxes':[],'rel':[],'images':[],'queries':[]}
+    for ex in gpv_examples:
+      total_output['pred_boxes'].append(ex.boxes.tolist())
+      total_output['rel'].append(ex.relevance.tolist())
+      total_output['images'].append(ex.image_ids)
+      total_output['queries'].append(ex.queries)
+    print(total_output,'total output')
+    return total_output
 
-def build_per_example_output(text, text_scores, boxes, rel, n_boxes=None, box_format="cxcywh") -> List[GPVExampleOutput]:
+def build_per_example_output(text, text_scores, boxes, rel,image_ids,queries,json_output=None,n_boxes=None, box_format="cxcywh") -> List[GPVExampleOutput]:
   out = []
   #print(text,'text')
+  print(image_ids,'image ids')
   if text_scores is not None:
     if isinstance(text_scores, torch.Tensor):
       text_scores = text_scores.cpu().numpy()
@@ -120,9 +133,13 @@ def build_per_example_output(text, text_scores, boxes, rel, n_boxes=None, box_fo
     end = None if n_boxes is None else n_boxes[i]
     ixs = np.argsort(rel[i, :end])
     example_boxes = torchvision.ops.box_convert(boxes[i, ixs], box_format, "cxcywh")
+ 
+     
+    
 
     out.append(GPVExampleOutput(
-      example_boxes.numpy(), rel[i, ixs], example_text, example_text_scores
+      example_boxes.numpy(), rel[i, ixs], example_text, example_text_scores,image_ids[i],queries[i]
     ))
+
   return out
 

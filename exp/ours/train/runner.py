@@ -200,7 +200,6 @@ def run_dist(model_source, examples, devices,
 
   return out
 
-
 def run_model(
     model, data_loader, beams_to_keep=1,
     desc="eval", nopbar=False, model_device=None,
@@ -213,7 +212,6 @@ def run_model(
     model_device = our_utils.get_model_device(model)
 
   model.set_prediction_args(**prediction_args)
-
   if desc is None:
     desc = "eval"
 

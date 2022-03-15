@@ -35,6 +35,7 @@ from exp.ours.data.stratified_subset_sampler import StratifiedSubsetSampler,Imag
 from exp.ours.util import our_utils, py_utils, image_utils
 from exp.ours.data.dataset import Dataset, Task
 from exp.ours.models.model import GPVModel
+from exp.ours.models.model import convert_to_total_output
 from exp.ours.util.our_utils import SubsetSampler, DistributedSubsetSampler, select_run_dir
 from exp.ours.util.py_utils import clear_if_nonempty, duration_to_str
 from exp.ours.train.runner import BeamSearchSpec, run_model, CollateWithBatch, \
@@ -396,6 +397,7 @@ class Trainer(FromParams):
   unseen_1_val = None 
   unseen_2_val = None
   seen_val = None
+  predict_mode = None
 
   @classmethod
   def from_params(
@@ -627,39 +629,26 @@ class Trainer(FromParams):
     all_train = []
     new_all_train = []
     total_lesson_datasets = []
-    print(len(training_examples),'training examples')
+  
     for lesson in training_examples:
-      #print(lesson,'lesson')
+        #print(lesson,'lesson')
+   
       all_train.append(py_utils.flatten_list(model.preprocess_example_train(x) for x in lesson))
     all_train_sizes = [len(x) for x in all_train]
-    assert len(new_all_train) <= 40
+  
     total_num_examples = 0
     syn_examples = []
     image_contrast_examples = []
     text_contrast_examples = []
     mil_examples = []
     for lesson in all_train:
-
+     
        if lesson[0].task == Task.SYNONYM:
         new_all_train = []
         for i in range(0,len(lesson),2):
-        #   print(all_train[i].image_id == all_train[i+1].image_id)
-          syn_examples.append([lesson[i],lesson[i+1]])
-          new_all_train.append([lesson[i],lesson[i+1]])
+
           global_all_train.append([lesson[i],lesson[i+1]])
-        # if len(new_all_train) <4:
-        #   raise TypeError
-        total_num_examples += len(new_all_train)
-        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(new_all_train))),batch_size=4,drop_last=True)
-        loader = self.train_loader.build(new_all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
-        # try:
-        #   if len(list(loader)) == 0:
-        #     print('loader 0')
-        #     pdb.set_trace()
-        # except IndexError:
-        #   pdb.set_trace()
-        #pdb.set_trace()
-        total_lesson_datasets.append(loader)
+     
        elif lesson[0].task == Task.IMAGECONTRAST or lesson[0].task == Task.TEXTCONTRAST:
         new_all_train = []
         train_dict = {}
@@ -672,215 +661,36 @@ class Trainer(FromParams):
           if len(train_dict[k]) > 1:
             new_train_dict[k] = train_dict[k]
         new_all_train = list(new_train_dict.values())
-        last_all_train = []
-        sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(new_all_train))),batch_size=1,drop_last=True)
         for i in new_all_train:
           if new_all_train[0][0].task == Task.IMAGECONTRAST:
-              image_contrast_examples.append(i)
+          
               global_all_train.append(i)
-              last_all_train.append(i)
+              
           if new_all_train[0][0].task == Task.TEXTCONTRAST:
-              text_contrast_examples.append(i)
-              global_all_train.append(i)
-              last_all_train.append(i)
-        if len(new_all_train) ==0:
-          raise TypeError
-        if len(last_all_train) ==0:
-          raise TypeError
-        total_num_examples+= len(new_all_train)
-        loader = self.train_loader.build(last_all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
-        # try:
-        #   if len(list(loader)) == 0:
-        #     print('loader 0')
-        #     pdb.set_trace()
-        # except IndexError:
-        #   pdb.set_trace()
-        total_lesson_datasets.append(loader)
+              global_all_train.append(i)    
        elif lesson[0].correct_answer != None:
             new_all_train = []
             for i in range(len(lesson)):
               assert lesson[i].task == Task.MIL
-              mil_examples.append(lesson[i])
+              
               new_all_train.append(lesson[i])
             global_all_train.append(new_all_train)
-            # if len(new_all_train) <16:
-            #   raise TypeError
-           
-            total_num_examples+= len(new_all_train)
-            sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(new_all_train))),batch_size=16,drop_last=True)
-            loader = self.train_loader.build(new_all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
-            # try:
-            #   if len(list(loader)) == 0:
-            #     print('loader 0')
-            #     pdb.set_trace()
-            # except IndexError:
-            #   print('loader 0')
-            #   pdb.set_trace()
-            total_lesson_datasets.append(loader)
+
        elif lesson[0].task == Task.DETECTION:
-     
-          print('using detection')
           new_all_train = []
           for i in range(len(lesson)):
             new_all_train.append(lesson[i])
           global_all_train.append(new_all_train)
 
-    # if not self.lesson_training:
-    #   for grp in training_examples:
-    #     all_train.append(py_utils.flatten_list(model.preprocess_example_train(x) for x in grp))
-    #   all_train_sizes = [len(x) for x in all_train]
-    #   #all_train = py_utils.flatten_list(all_train)
-    
-    #   shuffle = True
-    #   batch_size = self.train_loader.batch_size
-    #   if (any(x.train_sample is not None for x in self.train_datasets) or
-    #       self.stratify or is_distributed()):
-    #     # Use our custom sampler that handles all these cases
-    #     if is_distributed():
-    #       world_size, rank = dist.get_world_size(), dist.get_rank()
-    #       if batch_size % world_size != 0:
-    #         raise ValueError("Batch size not divisible by world size")
-    #       batch_size = batch_size // world_size
-    #       logging.info(f"Using batch size {batch_size} since there "
-    #               f"are {world_size} workers with base size of {self.train_loader.batch_size}")
-    #     else:
-    #       world_size, rank = None, None
-
-    #     samples = [x.train_sample for x in self.train_datasets]
-    #     sampler = StratifiedSubsetSampler(
-    #     all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
-    #   else:
-    #     shuffle = False   # Sampler does shuffling
-    #     loader_batch_size = 1  # Sampler does batching
-    #   batch_groups = runtime.grad_accumulation
-    #   if batch_groups > 1:
-    #     if batch_size % batch_groups != 0:
-    #       raise NotImplementedError("Batch size not divisible by grad accumulation steps")
-    #   prev_batch_size = batch_size
-    #   batch_size = batch_size // batch_groups
-    #   logging.info(f"Accumulating total of {prev_batch_size} through {batch_groups} size {batch_size} batches")
-    #   #print(all_train[0],all_train[1])
-    #   # sampler = StratifiedSubsetSampler(
-    #   #   all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)
-    #   # print(all_train[0].task,'task')
-    #   # print(all_train[0].task == 'synonym')
-    #   # print(all_train[0].task == Task.SYNONYM)
-    #   # if type(all_train[0]) == list:
-    #   #   all_train = new_all_train
-    #   print(all_train[0].task)
-    #   #pdb.set_trace()
-    #   if all_train[0].task == Task.SYNONYM:
-    #     new_all_train = []
-    #     for i in range(0,len(all_train),2):
-    #     #   print(all_train[i].image_id == all_train[i+1].image_id)
-    #       new_all_train.append([all_train[i],all_train[i+1]])
-    #     all_train = new_all_train
-    #     sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(all_train))),batch_size=8,drop_last=True)
-    #   elif all_train[0].task == Task.IMAGECONTRAST or all_train[0].task == Task.TEXTCONTRAST:
-    #     new_all_train = []
-    #     train_dict = {}
-    #     for t in all_train:
-    #       if t.meta not in train_dict:
-    #         train_dict[int(t.meta)] = []
-    #       train_dict[int(t.meta)].append(t)
-    #     new_all_train = list(train_dict.values())
-
-    #     # print(new_all_train[10][0].id,'before')
-    #     # random.shuffle(new_all_train)
-    #     # print(new_all_train[10][0].id,'after')
-    #     # print(new_all_train[10][1].id,'after')
-    #     #sampler = SynonymSampler(new_all_train)
-    #     #all_train = new_all_train
-    #     #sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(new_all_train),batch_size=3,drop_last=True)
-    #   # if len(all_train[0]) == 2:
-    #   #sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(all_train),batch_size=2,drop_last=True)
-
-    #   elif all_train[0].task == Task.IMAGECONTRAST or all_train[0].task == Task.TEXTCONTRAST:
-    #     new_all_train = []
-    #     train_dict = {}
-    #     for t in all_train:
-    #       if t.meta not in train_dict:
-    #         train_dict[int(t.meta)] = []
-    #       train_dict[int(t.meta)].append(t)
-    #     new_all_train = list(train_dict.values())
-
-
-
-    #     # new_all_train = []
-    #     # for i in range(0,len(all_train),16):
-    #     #   # for j in all_train[i:i+16]:
-    #     #   #   print(j.index_of_class,'idx class')
-    #     #   new_all_train.append(all_train[i:i+15])
-        
-    #     #   # print(new_all_train)
-    #     #   # print(new_all_train[0][0].index_of_class,'contrast group 1')
-    #     #   # print(new_all_train[0][15].index_of_class,'contrast group 2')
-    #     # for entry in new_all_train:
-    #     #   idx = entry[0].index_of_class
-    #     #   for v in entry:
-    #     #     if int(v.index_of_class) != int(idx):
-    #     #       print(idx,v.index_of_class)
-    #     #       raise Error
-    #     # print(len(new_all_train),len(all_train),'all train and new all train')
-    #     all_train = []
-    #     sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(new_all_train))),batch_size=1,drop_last=True)
-    #     for i in new_all_train:
-    #       if new_all_train[0][0].task == Task.IMAGECONTRAST:
-    #         if len(i)>= 10:
-    #           all_train.append(i)
-    #       if new_all_train[0][0].task == Task.TEXTCONTRAST:
-    #         if len(i)>=10:
-    #           all_train.append(i)
-
-    #         # if len(i) >16:
-    #         #   print('larger than 16')
-    #     #all_train = new_all_train
-    #     # for ex in all_train:
-    #     #   if ex.task != Task.IMAGECONTRAST or ex.task != Task.TEXTCONTRAST:
-    #     #     raise ValueError
-    #     print(len(all_train),'length of all train')
-    #     sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(all_train))),batch_size=1,drop_last=True)
-    #   elif all_train[0].correct_answer != None:
-    #     sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(all_train),batch_size=32,drop_last=True)
-    #   else:
-    #     sampler = sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(all_train),batch_size=32,drop_last=True)
-      
-    #   shuffle = False   # Sampler does shuffling
-    #   loader_batch_size = 1  # Sampler does batching
-    # else:
-    #   loader_batch_size = batch_size
-    #   sampler = None
-
-    # batch_groups = runtime.grad_accumulation
-    # if batch_groups > 1:
-    #   if batch_size % batch_groups != 0:
-    #     raise NotImplementedError("Batch size not divisible by grad accumulation steps")
-    #   prev_batch_size = batch_size
-    #   batch_size = batch_size // batch_groups
-    #   logging.info(f"Accumulating total of {prev_batch_size} through {batch_groups} size {batch_size} batches")
-    # #can change number of workers for loader here 
-
-    # loader = self.train_loader.build(
-    #   all_train, model.get_collate(True),
-    #   batch_size=loader_batch_size, shuffle=shuffle, batch_sampler=sampler)
-
-    # if batch_groups == 1:
-    #   return loader, len(loader), sampler
-    # else:
-    #   batch_group_generator = lazy_groups_of(loader, batch_groups)
-    #   num_training_batches = math.ceil(len(loader) / batch_groups)
-    #   return batch_group_generator, num_training_batches, sampler
-
     logging.info(f'Total number of examples {total_num_examples}')
-  
-
-    sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(global_all_train))),batch_size=2,drop_last=True)
-    # samples = [x.train_sample for x in self.train_datasets]
-    # sampler = StratifiedSubsetSampler(
-    # all_train_sizes, runtime.seed, self.stratify, samples, 15, None, None)
-    # shuffle = False   # Sampler does shuffling
-    # loader_batch_size = 1  # Sampler does batching
-    loader = self.train_loader.build(global_all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
+    if self.predict_mode != None:
+        all_train = py_utils.flatten_list(all_train)
+        sampler = torch.utils.data.BatchSampler(torch.utils.data.SequentialSampler(range(len(all_train))),batch_size=15,drop_last=False)
+        loader = self.train_loader.build(all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
+    else:
+      sampler = torch.utils.data.BatchSampler(torch.utils.data.RandomSampler(range(len(global_all_train))),batch_size=2,drop_last=True)
+    
+      loader = self.train_loader.build(global_all_train, model.get_collate(True),batch_size=1, shuffle=False, batch_sampler=sampler)
 
     return loader, total_num_examples
    
@@ -1001,7 +811,6 @@ class Trainer(FromParams):
         json.dump(to_save, fh, indent=2)
       save = {'val_score':result.values()}
       
-
     dataset_to_task = {}
     for k in self.train_datasets + self.eval_datasets:
       dataset_to_task[k.get_name()] = k.dataset.get_task()
@@ -1186,6 +995,35 @@ class Trainer(FromParams):
 
     if record_log_handle is not None:
       logging.getLogger().removeHandler(record_log_handle)
+  def predict(self,runtime,model):
+     device = runtime.devices
+
+     logging.info("Initializing model")
+     model.initialize()
+     train_state = _TrainingState()
+     device = torch.device(device)
+     model.to(device)
+     _base_model = model
+     logging.info("Preparing training loader")
+
+     training_examples = self._load_and_log_train()
+     #print(training_examples[0],'training examples')
+     print(len(training_examples),'examples after load and log train')
+     train_loader,total_examples = self._get_train_loader(_base_model, training_examples, runtime)
+     logging.info("Preparing evaluation")
+     eval_examples = self._load_and_log_eval(training_examples)
+     eval_runners = self._init_eval(_base_model, training_examples, eval_examples)
+     model.eval()
+     pbar = tqdm(train_loader,ncols=100,desc='eval',total=len(train_loader))
+     out_list = []
+     for i,batch in enumerate(pbar):
+       batch = our_utils.to_device(batch, device)
+       with torch.no_grad():
+         output = model.predict(**batch)
+         for ex in output:
+           out_list.append(ex)
+     total_output = convert_to_total_output(out_list)
+     io.dump_json_object(total_output,self.output_dir+'/vis_data.json')
 
   def _train_worker(self, model, training_examples,
                     run_dir, runtime: RunArgs,
@@ -1347,17 +1185,8 @@ class Trainer(FromParams):
           #pdb.set_trace()
 
           batch = our_utils.to_device(batch, device)
-          
-         
-         
-
-          loss, monitor,json_dump = model(**batch)
-          if self.actual_epoch == 0:
-            io.dump_json_object(json_dump,f'/home/michal/gpv_michal/beginning_syn_values_{i}.json')
-          if self.actual_epoch == 2:
-             io.dump_json_object(json_dump,f'/home/michal/gpv_michal/end_syn_values_{i}.json')
+          loss, monitor = model(**batch)  
           monitor = _remove_tensors(monitor)
-       
           loss.backward()
           loss = loss.item()
           total_l += loss 

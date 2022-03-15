@@ -182,11 +182,13 @@ class Weights(nn.Module):
     return loss.item()
 
 
-
+def run_eval_from_args(trainer, model, args,output_dir):
+  devices = RunArgs.build(get_devices(args.device), args.force_one_worker, args.grad_accumulation)
+  trainer.predict(model, output_dir, devices)
 
 def run_trainer_from_args(trainer, model, args,output_dir):
   devices = RunArgs.build(get_devices(args.device), args.force_one_worker, args.grad_accumulation)
-  trainer.train(model, output_dir, devices, override=args.override)
+  trainer.train(model, output_dir, devices)
 @dataclass
 class AutoTask(FromParams):
   train_tasks: Optional[List[str]] = None
@@ -216,7 +218,7 @@ class AutoTask(FromParams):
   start_trajec = 0
   best_trajec_score = 0
   output_dir = None
-  batch_size = 8
+  batch_size = 20
   combine_lesson = False
   temp_best_model_path = None 
   temp_best_trajec_score = None 
@@ -349,7 +351,23 @@ class AutoTask(FromParams):
       for i in range(len(self.lessons)):
         new_entries.append(entry)
     return loc_data
-     
+  def predict_for_vis(self,init_from):
+    self.initialize()
+    val_samples_1 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/seen_small/val.json')
+    self.trainer.train_datasets= [TrainerDataset(GpvDataset(Task.DETECTION, "val",'seen_small'),   "det-val-vis")]
+    self.trainer.predict_mode = True 
+    self.gpv_model.initialize_from = init_from
+    self.trainer.prefix = self.output_dir
+
+   
+    if not os.path.exists(self.output_dir+'/vis_pred'):
+      os.mkdir(self.output_dir+'/vis_pred')
+    self.trainer.output_dir = self.output_dir+'/vis_pred'
+   
+    devices = RunArgs.build(get_devices(self.args.device), self.args.force_one_worker, self.args.grad_accumulation)
+
+    self.trainer.predict(devices,self.gpv_model)
+
   def run(self):
     print(self.start_epoch,'start epoch')
     
@@ -366,7 +384,7 @@ class AutoTask(FromParams):
         self.auto_logger.info("Initialization complete")
         self.save()
       self.auto_logger.info(f'Epoch:{e}')
-      single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/small_num_localization_lessons.json')
+    
       single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/small_num_localization_lessons.json')
       
       data = single_image_data
@@ -474,6 +492,8 @@ def main():
   parser.add_argument("--outer_epochs",type=str,default=None)
   parser.add_argument("--batch_eval",type=str,default=None)
   parser.add_argument("--vis_eval",type=str,default=None)
+
+  parser.add_argument("--vis_init_from",type=str,default=None)
   add_image_featurizer_args(parser, vfreeze="all", vmodel="vinvl")
   add_train_args(
     parser, tasks=[str(Task.CAPTIONING)], epochs=4,
@@ -580,8 +600,10 @@ def main():
     os.mkdir(a.output_dir+'/weight_files')
   print(a.best_model_path)
   print(a.best_trajec_score)
-
-  a.run()
+  if args.vis_eval != None:
+    a.predict_for_vis(args.vis_init_from)
+  else:
+    a.run()
 
 if __name__ == '__main__':
   main()
