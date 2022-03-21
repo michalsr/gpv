@@ -388,13 +388,13 @@ def main():
 
   if args.output_dir and args.output_name:
     raise ValueError("Cannot specify output_name and output_dir")
-  model_to_eval = 'outputs/good_lessons_only_new_lesson_format/best_model'
+  model_to_eval = 'outputs/seen_60_per_box_redo'
   models = our_utils.find_models(model_to_eval)
   print(models)
   # if len(models) == 0:
   #   logging.info("No models selected")
   #   return
-  run_dir = 'outputs/mil'
+  run_dir = 'outputs/m'
   devices = our_utils.get_devices(args.device)
   # if args.output_dir:
   #   models = py_utils.flatten_list(x[1] for x in models.values())

@@ -46,6 +46,7 @@ def load_instances(kind, split,split_txt, gpv_split=True,unseen_split=False) -> 
   #   split_txt = "held_out_all"
   # else:
   #   split_txt = "original_split"
+  print(ds,file_paths.SOURCE_DIR,split_txt)
   target_file = join(file_paths.SOURCE_DIR, ds, split_txt, f"{split}.json")
   logging.info(f"Loading instances from {target_file}")
   g = load_json_object(target_file)
@@ -210,9 +211,9 @@ GPV_KINDS = {
 }
 
 
-def load_gpv_instances(kind, split, gpv_split,split_txt):
+def load_gpv_instances(kind, split,split_txt,gpv_split=False,raw_instances=False):
 
-  return GPV_KINDS[kind](split, gpv_split,split_txt)
+  return GPV_KINDS[kind](split, split_txt, gpv_split=gpv_split,raw_instances=raw_instances)
 
 
 def split_seen_unseen(instances):
@@ -302,7 +303,10 @@ class GpvDataset(Dataset):
   def change_split(self,new_split):
     self.split_txt = new_split
   def load(self):
-    instances = self.KINDS[self.task](self.split, self.gpv_split,self.split_txt,self.raw_instances)
+    print(self.split,'split')
+    print(self.gpv_split,'gpv split')
+    print(self.split_txt,'split txt')
+    instances = self.KINDS[self.task](self.split,self.split_txt,self.raw_instances)
     if self.per_example_captions and self.task == Task.CAPTIONING:
       per_ex = []
       for instance in instances:

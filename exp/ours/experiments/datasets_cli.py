@@ -52,7 +52,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=Non
 
   parts = list(args.part)
   if any(x == "all" for x in parts):
-    parts = ["val", "train", "test"]
+    parts = ["val",  "test"]
 
   sample = None if not sample else getattr(args, "sample", None)
 
@@ -93,7 +93,8 @@ def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=Non
       to_show += [CocoSegmentationDataset(part, sample)]
   for task in gpv_tasks:
     for part in parts:
-      to_show += [GpvDataset(task, part, trained_on_sce, sample=sample)]
+      #to_show += [GpvDataset(task, part, trained_on_sce, sample=sample)]
+      to_show += [GpvDataset(task, part, split_txt='seen_single_phrase',gpv_split=False)]
   for task in open_sce_tasks:
     for part in parts:
       to_show += [OpenSceDataset(task, part, sample=sample)]

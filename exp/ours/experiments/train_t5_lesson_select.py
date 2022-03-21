@@ -218,7 +218,7 @@ class AutoTask(FromParams):
   start_trajec = 0
   best_trajec_score = 0
   output_dir = None
-  batch_size = 20
+  batch_size = 8
   combine_lesson = False
   temp_best_model_path = None 
   temp_best_trajec_score = None 
@@ -295,9 +295,18 @@ class AutoTask(FromParams):
     val_samples_1 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase/val.json')
     val_samples_2 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_2_single_phrase/val.json')
     val_samples_3 = io.load_json_object('/data/michal5/gpv/learning_phase_data/coco_detection/seen_single_phrase/val.json')
-    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'unseen_group_1_single_phrase'),   "det-val-unseen-1",eval_sample=len(val_samples_1),eval_setup=loc_setup))
-    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'unseen_group_2_single_phrase'),   "det-val-unseen-2",eval_sample=len(val_samples_2),eval_setup=loc_setup))
-    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",'seen_single_phrase'),   "det-val-seen",eval_sample=len(val_samples_3),eval_setup=loc_setup))
+    
+    self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",split_txt='unseen_group_1_single_phrase'),   "det-val-unseen-1",eval_sample=len(val_samples_1),eval_setup=loc_setup))
+    # self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",split_txt='unseen_group_2_single_phrase'),   "det-val-unseen-2",eval_sample=len(val_samples_2),eval_setup=loc_setup))
+    # self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",split_txt='seen_single_phrase'),   "det-val-seen",eval_sample=len(val_samples_3),eval_setup=loc_setup))
+    c_names = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
+             'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
+             'hot dog', 'keyboard', 'laptop', 'train', 'tv']
+    for c in c_names:
+      val_samples = io.load_json_object(f'/data/michal5/gpv/learning_phase_data/coco_detection/{c}/val.json')
+      self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION,"val",split_txt=f'{c}'),f"det-val-{c}",eval_sample=len(val_samples),eval_setup=loc_setup))
+
+
 
     self.trainer.best_model_key.append(ResultKey("AP", dataset_name="det-val"))
     self.trainer.stratify = True
@@ -372,6 +381,7 @@ class AutoTask(FromParams):
     print(self.start_epoch,'start epoch')
     
     for e in range(self.start_epoch,self.epochs):
+
       if e>0:
         self.auto_logger.info('weight at beginning of epoch')
         for l,p in enumerate(self.policy_network.weights.tolist()):
@@ -385,7 +395,7 @@ class AutoTask(FromParams):
         self.save()
       self.auto_logger.info(f'Epoch:{e}')
     
-      single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/small_num_localization_lessons.json')
+      single_image_data = io.load_json_object(f'{self.file_prefix}/gpv_michal/lessons/full_localization_data_3.json')
       
       data = single_image_data
       print(len(data))
@@ -415,19 +425,22 @@ class AutoTask(FromParams):
         new_output_dir = f'{self.output_dir}/temp_dir/'
         self.trajec_to_output_dir[f'trajec_{j}'] = new_output_dir
         if e == 0 or self.best_model_path == None:
-          init_from = f'{self.file_prefix}/gpv_michal/outputs/seen_60_only_gpv_per_box/r0/best-state.pth'
+          init_from = f'{self.file_prefix}/gpv_michal/outputs/seen_60_per_box_redo/r0/best-state.pth'
+       
         else:
           init_from = self.best_model_path+'best-state.pth'
         self.adjust_trainer(new_output_dir,init_from,data,e)
         self.auto_logger.info(f'initialize from {self.gpv_model.initialize_from}')
         print(self.gpv_model.initialize_from,'initialize from')
         run_trainer_from_args(self.trainer,self.gpv_model,self.args,new_output_dir)
+        for v in self.trainer.val_dict:
+          self.summary_writer.add_scalar(f'{v}',self.trainer.val_dict[v],self.inner_log_step)
         trajec_score = io.load_json_object(new_output_dir+'r0/val_score.json')
         #trajec_score = {'val':0.5}
         self.auto_logger.info(f"Trajectory {j} has reward {self.trainer.val_score}")
         self.summary_writer.add_scalar('unseen_1_val',self.trainer.unseen_1_val,self.inner_log_step)
-        self.summary_writer.add_scalar('unseen_2_val',self.trainer.unseen_2_val,self.inner_log_step)
-        self.summary_writer.add_scalar('seen_val',self.trainer.seen_val,self.inner_log_step)
+        # self.summary_writer.add_scalar('unseen_2_val',self.trainer.unseen_2_val,self.inner_log_step)
+        # self.summary_writer.add_scalar('seen_val',self.trainer.seen_val,self.inner_log_step)
   
         self.trajec_to_validation_scores[f'trajec_{j}'] = float(self.trainer.val_score)
         if float(self.trainer.val_score) > self.global_best_val:
