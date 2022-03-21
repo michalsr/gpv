@@ -398,6 +398,7 @@ class Trainer(FromParams):
   unseen_2_val = None
   seen_val = None
   predict_mode = None
+  val_dict = {}
 
   @classmethod
   def from_params(
@@ -629,7 +630,7 @@ class Trainer(FromParams):
     all_train = []
     new_all_train = []
     total_lesson_datasets = []
-  
+    #print(training_examples,'training examples')
     for lesson in training_examples:
         #print(lesson,'lesson')
    
@@ -1146,12 +1147,12 @@ class Trainer(FromParams):
     loss_ema = train_state.loss_ema
 
     # Do initial eval if asked
-    # if self.actual_epoch ==0:
-    #   eval_dir = self._get_train_eval_dir(run_dir, 0, 0)
-    #   results = self._run_eval(_base_model, eval_runners, 0, runtime.seed, eval_dir)
-    #   for k in results:
-    #     print('unseen' in str(k))
-    #     logging.info(f'Initial evaluation score for {k} is {results[k]}')
+
+    # eval_dir = self._get_train_eval_dir(run_dir, 0, 0)
+    # results = self._run_eval(_base_model, eval_runners, 0, runtime.seed, eval_dir)
+    # for k in results:
+    #   print('unseen' in str(k))
+    #   logging.info(f'Initial evaluation score for {k} is {results[k]}')
      
     if self.eval_at_start and global_step == 0:
       logging.info("Starting initial eval")
@@ -1300,11 +1301,13 @@ class Trainer(FromParams):
           if 'unseen-1' in str(k):
             self.val_score = float(results[k])
             self.unseen_1_val = float(results[k])
-          elif 'unseen-2' in str(k):
-            self.unseen_2_val = float(results[k])
-          else:
-            assert 'seen' in str(k)
-            self.seen_val = float(results[k])
+          self.val_dict[f'{str(k)}'] = float(results[k])
+         
+          # elif 'unseen-2' in str(k):
+          #   self.unseen_2_val = float(results[k])
+          # else:
+          
+          #   self.seen_val = float(results[k])
          
       score_dict = {"val":self.val_score}
     
