@@ -10,7 +10,9 @@ from PIL import Image
 import torch
 import torchvision.ops
 import utils.io as io 
+from argparse import ArgumentParser
 def cxcywh_to_xyxy(bbox,im_h=1,im_w=1):
+
     cx,cy,w,h = bbox
     cx,cy,w,h = cx*im_w,cy*im_h,w*im_w,h*im_h
     x1 = cx - 0.5*w
@@ -139,7 +141,7 @@ border: thin solid;
   #cols = ['Initial','Hierarchical', 'Contrast','MIL','Query','Score']
 
   #cols = ['MIL','Query','Score']
-  cols = ['Hierarchical','Query','Score']
+  cols = ['Initial_1','Initial_2','Initial_3','Initial_4','Initial_5','Query','Score']
   html += ['\t<tr>']
   for col in cols:
     html += [_html("th", col, "text-align:center")]
@@ -148,6 +150,7 @@ border: thin solid;
   for row in rows:
     html += [f'\t<tr>']
     for k in cols:
+     
       html += [f'<td style="text-align:center">']
       val = [""] if k not in row else row[k]
 
@@ -166,10 +169,14 @@ def create_html_file(entries,file_name):
     table = []
     for entry in entries:
         row = dict()
-        #row['Initial'] = create_img_entry(entry['initial'],entry['initial_actual_img_src'])
+        row['Initial_1'] = create_img_entry(entry['initial_1'],entry['initial_actual_img_src_1'])
+        row['Initial_2'] = create_img_entry(entry['initial_2'],entry['initial_actual_img_src_2'])
+        row['Initial_3'] = create_img_entry(entry['initial_3'],entry['initial_actual_img_src_3'])
+        row['Initial_4'] = create_img_entry(entry['initial_4'],entry['initial_actual_img_src_4'])
+        row['Initial_5'] = create_img_entry(entry['initial_1'],entry['initial_actual_img_src_5'])
         #row['MIL'] = create_img_entry(entry['MIL'],entry['MIL_actual_img_src'])
         #row['Contrast'] = create_img_entry(entry['contrast'],entry['contrast_actual_img_src'])
-        row['Hierarchical'] = create_img_entry(entry['hierarchical'],entry['hierarchical_actual_img_src'])
+        #row['Hierarchical'] = create_img_entry(entry['hierarchical'],entry['hierarchical_actual_img_src'])
         #row['MIL'] = create_img_entry(entry['mil'],entry['mil_actual_img_src'])
         
         row['Query'] = entry['rel_query']
@@ -181,40 +188,54 @@ def create_html_file(entries,file_name):
     html = "\n".join(final_table)
     with open(file_name, "w") as f:
         f.write(html)
-def create_visual_outputs(model_name,number,model_output):
-  image_file = image_utils.get_image_file(model_output['image_ids'][number])
+def create_visual_outputs(model_name,number,model_output,file_name,file_prefix,box_num=None):
+  # print(model_output.keys())
+  # print(model_output['pred_boxes'][number])
+  if box_num == None:
+    selection = -1 
+  else:
+    selection=box_num
+  image_file = image_utils.get_image_file(model_output['images'][number])
   img = Image.open(image_file)
-  print(model_output['pred_boxes'][number])
+
   #box = torchvision.ops.box_convert(torch.tensor(model_output['pred_boxes'][number]),"cxcywh", "cxcywh")
-  updated_img_np = vis_bbox(model_output['pred_boxes'][number],np.asarray(img),modify=True)
+  updated_img_np = vis_bbox(model_output['pred_boxes'][number][selection],np.asarray(img),modify=True)
   updated_img = Image.fromarray(updated_img_np)
   updated_img = updated_img.resize((224, 224), Image.ANTIALIAS)
-  if not os.path.exists(f'/home/michal/gpv_michal/outputs/hierarchical_vis_html/html_file/{model_name}'):
-        os.mkdir(f'/home/michal/gpv_michal/outputs/hierarchical_vis_html/html_file/{model_name}')
-  updated_img.save(f'/home/michal/gpv_michal/outputs/hierarchical_vis_html/html_file/{model_name}/img_{number}.jpg')
-  return f'/home/michal/gpv_michal/outputs/hierarchical_vis_html/html_file/{model_name}/img_{number}.jpg',f'{model_name}/img_{number}.jpg'
-def make_html_entries():
+  if not os.path.exists(f'{file_prefix}/gpv_michal/outputs/{file_name}_html/html_file/{model_name}'):
+        os.makedirs(f'{file_prefix}/gpv_michal/outputs/{file_name}_html/html_file/{model_name}')
+  updated_img.save(f'{file_prefix}/gpv_michal/outputs/{file_name}_html/html_file/{model_name}/img_{number}_{selection}.jpg')
+  return f'{file_prefix}/gpv_michal/outputs/{file_name}_html/html_file/{model_name}/img_{number}_{selection}.jpg',f'{model_name}/img_{number}_{selection}.jpg'
+def make_html_entries(file_name,file_prefix):
   final_entries = []
   #make dict mapping from col name to output 
   #add 3 entries entry['hiearchical'] = image, entry['contrast'] = image, etc
   #load model output from each model 
   #choose 5 coco entries to do 
   #after map top 5 bounding boxes for each model  
-  initial_output = io.load_json_object('/home/michal/gpv_michal/outputs/initial_unseen_group_1_final/vis_pred/vis_data.json')
-  mil_output = io.load_json_object('/home/michal/gpv_michal/outputs/mil_unseen_group_1_final/vis_pred/vis_data.json')
-  contrast_output = io.load_json_object('/home/michal/gpv_michal/outputs/contrast_unseen_group_1_final/vis_pred/vis_data.json')
-  syn_output = io.load_json_object('/home/michal/gpv_michal/outputs/syn_unseen_group_1_final/vis_pred/vis_data.json')
-  for i in range(len(initial_output['images'])):
-    entry = {}
-    entry['initial'],entry['initial_actual_img_src'] = create_visual_outputs('initial',i,initial_output)
-    entry['MIL'],entry['MIL_actual_img_src'] = create_visual_outputs('mil',i,mil_output)
-    entry['contrast'],entry['contrast_actual_img_src'] = create_visual_outputs('contrast',i,contrast_output)
-    entry['hierarchical'],entry['hierarchical_actual_img_src'] = create_visual_outputs('hierarchical',i,syn_output)
-    entry['rel_query'] = initial_output['queries'][i]
+  initial_output = io.load_json_object(f'{file_prefix}/gpv_michal/outputs/{file_name}/vis_pred/vis_data.json')
+  #mil_output = io.load_json_object('/home/michal/gpv_michal/outputs/mil_unseen_group_1_final/vis_pred/vis_data.json')
+  #contrast_output = io.load_json_object('/home/michal/gpv_michal/outputs/contrast_unseen_group_1_final/vis_pred/vis_data.json')
+  #syn_output = io.load_json_object('/home/michal/gpv_michal/outputs/syn_unseen_group_1_final/vis_pred/vis_data.json')
+  #for i in range(len(initial_output['images'])):
+  for i in range(200):
+   
+      entry = {}
+      entry[f'initial_1'],entry['initial_actual_img_src_1'] = create_visual_outputs('initial',i,initial_output,file_name,file_prefix,box_num=-1)
+      entry[f'initial_2'],entry['initial_actual_img_src_2'] = create_visual_outputs('initial',i,initial_output,file_name,file_prefix,box_num=-2)
+      entry[f'initial_3'],entry['initial_actual_img_src_3'] = create_visual_outputs('initial',i,initial_output,file_name,file_prefix,box_num=-3)
+      entry[f'initial_4'],entry['initial_actual_img_src_4'] = create_visual_outputs('initial',i,initial_output,file_name,file_prefix,box_num=-4)
+      entry[f'initial_5'],entry['initial_actual_img_src_5'] = create_visual_outputs('initial',i,initial_output,file_name,file_prefix,box_num=-5)
+      #entry['MIL'],entry['MIL_actual_img_src'] = create_visual_outputs('mil',i,mil_output)
+      #entry['contrast'],entry['contrast_actual_img_src'] = create_visual_outputs('contrast',i,contrast_output)
+      #entry['hierarchical'],entry['hierarchical_actual_img_src'] = create_visual_outputs('hierarchical',i,syn_output)
+      entry['rel_query'] = initial_output['queries'][i]
+      
+      entry['rel'] = str(initial_output['rel'][i][-1])+','+str(initial_output['rel'][i][-2])+','+str(initial_output['rel'][i][-3])+','+str(initial_output['rel'][i][-4]) + ',' + str(initial_output['rel'][i][-5])
 
-    final_entries.append(entry)
-    print(entry,'entry')
-  io.dump_json_object(final_entries,f'/home/michal/gpv_michal/outputs/unseen_group_1_html/html_file/html_entries.json')
+      final_entries.append(entry)
+  
+  io.dump_json_object(final_entries,f'{file_prefix}/gpv_michal/outputs/{file_name}_html/html_file/html_entries.json')
   return final_entries
 
 def second_html_entries():
@@ -222,7 +243,7 @@ def second_html_entries():
   new_syn_vis_data = io.load_json_object('/home/michal/gpv_michal/outputs/syn_vis_data/html_files.json')
 
   #for i in range(len(new_syn_vis_data['queries'])):
-  print(len(new_syn_vis_data['image_ids']),'num')
+
   for i in range(1000):
     entry = {}
     #entry['mil'],entry['mil_actual_img_src'] = create_visual_outputs('mil',i,new_syn_vis_data)
@@ -232,10 +253,19 @@ def second_html_entries():
     final_entries.append(entry)
   io.dump_json_object(final_entries,'/home/michal/gpv_michal/outputs/hierarchical_vis_html/html_entries.json')
   return final_entries
+def main():
+  parser = ArgumentParser()
+  parser.add_argument("--file_name",type=str)
+  parser.add_argument("--file_prefix",type=str)
+  args = parser.parse_args()
+  entries = make_html_entries(args.file_name,args.file_prefix)
+  create_html_file(entries,f'{args.file_prefix}/gpv_michal/outputs/{args.file_name}_html/html_file/vis.html')
 
-entries = second_html_entries()
 
-create_html_file(entries,'/home/michal/gpv_michal/outputs/hierarchical_vis_html/html_file/vis.html')
+if __name__ == '__main__':
+  main()
+
+
 
 
 
