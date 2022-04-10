@@ -8,7 +8,8 @@ from allennlp.common import FromParams, Registrable
 from nltk import word_tokenize
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.cider.cider import Cider
-
+from cocoapi.PythonAPI.pycocotools.coco import COCO
+from cocoapi.PythonAPI.pycocotools.cocoeval import COCOeval 
 import third_party.detection_metrics.lib.Evaluator as det_evaluator
 from data.coco.synonyms import SYNONYMS
 from exp.ours import file_paths
@@ -31,7 +32,7 @@ from exp.ours.util import py_utils
 import numpy as np
 
 from exp.ours.train.quiet_ptbtokenizer import QuitePTBTokenizer
-from utils.io import load_json_object
+from utils.io import load_json_object, dump_json_object
 from nltk.stem import WordNetLemmatizer
 from collections import Counter
 
@@ -403,14 +404,53 @@ class LocalizationEvaluator(PerExampleEvaluator):
 
   def __init__(self, iou_thresh=0.5):
     self.iou_thresh = iou_thresh
+  def log_detection_eval_metrics(self,json_dataset, coco_eval):
+    def _get_thr_ind(coco_eval, thr):
+        ind = np.where((coco_eval.params.iouThrs > thr - 1e-5) &
+                       (coco_eval.params.iouThrs < thr + 1e-5))[0][0]
+        iou_thr = coco_eval.params.iouThrs[ind]
+        assert np.isclose(iou_thr, thr)
+        return ind
+
+    IoU_lo_thresh = 0.5
+    IoU_hi_thresh = 0.95
+    ind_lo = _get_thr_ind(coco_eval, IoU_lo_thresh)
+    ind_hi = _get_thr_ind(coco_eval, IoU_hi_thresh)
+    # precision has dims (iou, recall, cls, area range, max dets)
+    # area range index 0: all area ranges
+    # max dets index 2: 100 per image
+    precision = coco_eval.eval['precision'][ind_lo:(ind_hi + 1), :, :, 0, 2]
+    ap_default = np.mean(precision[precision > -1])
+    print(
+        '~~~~ Mean and per-category AP @ IoU=[{:.2f},{:.2f}] ~~~~'.format(
+            IoU_lo_thresh, IoU_hi_thresh))
+    print('{:.1f}'.format(100 * ap_default))
+    for cls_ind, cls in enumerate(json_dataset.classes):
+        if cls == '__background__':
+            continue
+        # minus 1 because of __background__
+        precision = coco_eval.eval['precision'][
+            ind_lo:(ind_hi + 1), :, cls_ind, 0, 2]
+        ap = np.mean(precision[precision > -1])
+        print('{:.1f}'.format(100 * ap))
+    print('~~~~ Summary metrics ~~~~')
+
+
+  def get_coco_categories(self):
+    categories = load_json_object('/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json')
+    coco_id_to_category = {x["id"]: x["name"] for x in categories}
+    coco_categories= list(coco_id_to_category.values())
+    coco_categories_to_id = {k: i for i, k in enumerate(categories)}
+    return coco_categories, coco_id_to_category, coco_categories_to_id
 
   def evaluate_examples(self, examples: List[LocalizationExample], predictions: Dict[str, GPVExampleOutput],
                         return_pr=False):
-    print(len(examples),'example length')
+
+    coco_dataset = COCO(annotation_file='/data/michal5/gpv/learning_phase_data/coco_detection/unseen_group_1_single_phrase_coco/val.json')
+    coco_categories, coco_id_to_category, coco_categories_to_id = self.get_coco_categories()
     eval_engine = det_evaluator.Evaluator()
     out = []
-
-    for i, ex in enumerate(examples):
+    for i,ex in enumerate(examples):
       pred = predictions[ex.gpv_id]
       scores = pred.relevance
       pred_boxes = pred.boxes.copy()
@@ -425,53 +465,85 @@ class LocalizationEvaluator(PerExampleEvaluator):
       W, H = get_image_size(ex.image_id)
 
       for b in range(B):
+        box_dict = {}
         x, y, w, h = pred_boxes[b]
-        all_boxes.addBoundingBox(det_evaluator.BoundingBox(
-          imageName=ex.image_id,
-          classId=ex.category,
-          x=x,
-          y=y,
-          w=w,
-          h=h,
-          typeCoordinates=det_evaluator.CoordinatesType.Relative,
-          imgSize=(W, H),
-          bbType=det_evaluator.BBType.Detected,
-          classConfidence=scores[b],
-          format=det_evaluator.BBFormat.XYWH))
+        box_dict['image_id'] = ex.image_id 
+        box_dict['category_id'] = coco_categories_to_id[pred.category]
+        box_dict['bbox'] = [x,y,w,h]
+        box_dict['score'] = scores[b]
+        out.append(box_dict)
+      dump_json_object(out,'/data/michal5/gpv/learning_phase_data/coco_detection/results.json')
+      result_api = coco_dataset.loadRes('/data/michal5/gpv/learning_phase_data/coco_detection/results.json')
+      coco_eval = COCOeval(coco_dataset,result_api,'bbox')
+      coco_eval.evaluate()
+      coco_eval.accumulate()
+      self.log_detection_eval_metrics(coco_dataset, coco_eval)
 
-      normalized_gt = all(all(val <= 1.0 for val in b) for b in gt_boxes)
-      if not normalized_gt:
-        # convert to relative coordinates
-        # TODO its a bit of hack to check this by looking coordinates > 1.0
-        # but we need this check atm since OpenSCE stores relative scaling
-        # coco uses absolute
-        W, H = get_image_size(ex.image_id)
-        gt_boxes[:, 0] = gt_boxes[:, 0] / W
-        gt_boxes[:, 1] = gt_boxes[:, 1] / H
-        gt_boxes[:, 2] = gt_boxes[:, 2] / W
-        gt_boxes[:, 3] = gt_boxes[:, 3] / H
 
-      B = gt_boxes.shape[0]
-      for b in range(B):
-        x, y, w, h = gt_boxes[b]
+    
 
-        all_boxes.addBoundingBox(det_evaluator.BoundingBox(
-          imageName=ex.image_id,
-          classId=ex.category,
-          x=x,
-          y=y,
-          w=w,
-          h=h,
-          typeCoordinates=det_evaluator.CoordinatesType.Relative,
-          imgSize=(W, H),
-          bbType=det_evaluator.BBType.GroundTruth,
-          format=det_evaluator.BBFormat.XYWH))
+    # for i, ex in enumerate(examples):
+    #   pred = predictions[ex.gpv_id]
+    #   scores = pred.relevance
+    #   pred_boxes = pred.boxes.copy()
+    #   gt_boxes = np.array(ex.bboxes)
 
-      det_metrics = eval_engine.GetPascalVOCMetrics(all_boxes, self.iou_thresh)
-      if return_pr:
-        out.append(det_metrics[0])
-      else:
-        out.append({"AP": det_metrics[0]['AP']})
+    #   # Convert cx cy, w, h -> x1, y1, w, h
+    #   pred_boxes[:, 0] = pred_boxes[:, 0] - 0.5 * pred_boxes[:, 2]
+    #   pred_boxes[:, 1] = pred_boxes[:, 1] - 0.5 * pred_boxes[:, 3]
+
+    #   B = pred_boxes.shape[0]
+    #   all_boxes = det_evaluator.BoundingBoxes()
+    #   W, H = get_image_size(ex.image_id)
+
+    #   for b in range(B):
+    #     x, y, w, h = pred_boxes[b]
+    #     all_boxes.addBoundingBox(det_evaluator.BoundingBox(
+    #       imageName=ex.image_id,
+    #       classId=ex.category,
+    #       x=x,
+    #       y=y,
+    #       w=w,
+    #       h=h,
+    #       typeCoordinates=det_evaluator.CoordinatesType.Relative,
+    #       imgSize=(W, H),
+    #       bbType=det_evaluator.BBType.Detected,
+    #       classConfidence=scores[b],
+    #       format=det_evaluator.BBFormat.XYWH))
+
+    #   normalized_gt = all(all(val <= 1.0 for val in b) for b in gt_boxes)
+    #   if not normalized_gt:
+    #     # convert to relative coordinates
+    #     # TODO its a bit of hack to check this by looking coordinates > 1.0
+    #     # but we need this check atm since OpenSCE stores relative scaling
+    #     # coco uses absolute
+    #     W, H = get_image_size(ex.image_id)
+    #     gt_boxes[:, 0] = gt_boxes[:, 0] / W
+    #     gt_boxes[:, 1] = gt_boxes[:, 1] / H
+    #     gt_boxes[:, 2] = gt_boxes[:, 2] / W
+    #     gt_boxes[:, 3] = gt_boxes[:, 3] / H
+
+    #   B = gt_boxes.shape[0]
+    #   for b in range(B):
+    #     x, y, w, h = gt_boxes[b]
+
+    #     all_boxes.addBoundingBox(det_evaluator.BoundingBox(
+    #       imageName=ex.image_id,
+    #       classId=ex.category,
+    #       x=x,
+    #       y=y,
+    #       w=w,
+    #       h=h,
+    #       typeCoordinates=det_evaluator.CoordinatesType.Relative,
+    #       imgSize=(W, H),
+    #       bbType=det_evaluator.BBType.GroundTruth,
+    #       format=det_evaluator.BBFormat.XYWH))
+
+    #   det_metrics = eval_engine.GetPascalVOCMetrics(all_boxes, self.iou_thresh)
+    #   if return_pr:
+    #     out.append(det_metrics[0])
+    #   else:
+    #     out.append({"AP": det_metrics[0]['AP']})
 
     return out
 
