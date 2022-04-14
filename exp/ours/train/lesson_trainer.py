@@ -721,7 +721,7 @@ class Trainer(FromParams):
       all_results = {}
       for name, eval in runners.items():
         outputs = eval.get_predictions(model)
-        results = eval.evaluator.evaluate(eval.examples, outputs, allow_partial=True)
+        results = eval.evaluator.evaluate(eval.examples, outputs)
         if self.save_prediction_samples != 0 and eval_dir is not None:
           to_save = py_utils.sample_dict(outputs, self.save_prediction_samples)
           save_gpv_output(to_save, self._get_task_eval_dir(eval_dir, name))

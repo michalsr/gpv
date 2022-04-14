@@ -611,7 +611,7 @@ class Trainer(FromParams):
                      f"are {world_size} workers with base size of {self.train_loader.batch_size}")
       else:
         world_size, rank = None, None
-      pdb.set_trace()
+   
       samples = [x.train_sample for x in self.train_datasets]
       sampler = StratifiedSubsetSampler(
         all_train_sizes, runtime.seed, self.stratify, samples, batch_size, rank, world_size)

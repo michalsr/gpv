@@ -34,7 +34,7 @@ class GPVExampleOutput:
   def set_beams_to_keep(self, n):
     if self.text is None:
       return self
-    return GPVExampleOutput(self.boxes, self.relevance, self.text[:n], self.text_logprobs[:n])
+    return GPVExampleOutput(self.boxes, self.relevance, self.text[:n], self.text_logprobs[:n],image_ids=self.image_ids,queries=self.queries)
 
 
 class PredictionArg(Registrable):

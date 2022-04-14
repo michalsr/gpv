@@ -299,12 +299,12 @@ class AutoTask(FromParams):
     self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",split_txt='unseen_group_1_single_phrase'),   "det-val-unseen-1",eval_sample=len(val_samples_1),eval_setup=loc_setup))
     # self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",split_txt='unseen_group_2_single_phrase'),   "det-val-unseen-2",eval_sample=len(val_samples_2),eval_setup=loc_setup))
     # self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION, "val",split_txt='seen_single_phrase'),   "det-val-seen",eval_sample=len(val_samples_3),eval_setup=loc_setup))
-    c_names = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
-             'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
-             'hot dog', 'keyboard', 'laptop', 'train', 'tv']
-    for c in c_names:
-      val_samples = io.load_json_object(f'/data/michal5/gpv/learning_phase_data/coco_detection/{c}/val.json')
-      self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION,"val",split_txt=f'{c}'),f"det-val-{c}",eval_sample=len(val_samples),eval_setup=loc_setup))
+    # c_names = ['bed', 'bench', 'book', 'cell phone', 'horse', 'remote',
+    #          'sheep', 'suitcase', 'surfboard', 'wine glass','banana', 'baseball bat', 'bottle', 'broccoli', 'donut',
+    #          'hot dog', 'keyboard', 'laptop', 'train', 'tv']
+    # for c in c_names:
+    #   val_samples = io.load_json_object(f'/data/michal5/gpv/learning_phase_data/coco_detection/{c}/val.json')
+    #   self.trainer.eval_datasets.append(TrainerDataset(GpvDataset(Task.DETECTION,"val",split_txt=f'{c}'),f"det-val-{c}",eval_sample=len(val_samples),eval_setup=loc_setup))
 
 
 

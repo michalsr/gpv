@@ -12,8 +12,10 @@ import numpy as np
 import utils.io as io 
 from os.path import join, dirname
 from utils.io import load_json_object
+
+
 def get_coco_categories():
-  coco_file = '/home/michal/gpv_michal/exp/ours/data/coco_categories.json'
+  coco_file = '/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json'
   return load_json_object(coco_file)
 
 
@@ -37,9 +39,12 @@ def create_training_datasets(data,sampled_lessons,batch_size,map_int_to_lesson,l
     coco_loc_data = '/data/michal5/gpv/learning_phase_data/coco_detection/seen_only/train.json'
 
     lesson_count = {'image_contrast':0,'text_contrast':0,'mil':0,'synonym':0,'coco':0}
-    num_split = len(data)
+   
+    num_split = int(len(data)/8)
+    final_index = len(data)%8
     #if coco data is used then not all of new data will be used 
-    new_data = np.split(np.array(data),num_split)
+    print(num_split,final_index)
+    new_data = np.split(np.array(data)[:-1*final_index],num_split)
     print(map_int_to_lesson,'map int to lesson')
     assert len(new_data) >= len(sampled_lessons)
     for i in sampled_lessons:

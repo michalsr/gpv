@@ -32,8 +32,9 @@ from exp.ours.train.runner import BeamSearchSpec, save_gpv_output, \
   run, prediction_args_to_json
 from exp.ours.util.to_params import to_params
 from exp.ours.train.trainer import TrainerDataset, RunArgs, Trainer, EvaluationSetup
-
-
+import utils.io as io 
+import cv2
+import numpy as np
 
 @dataclass
 class EvaluationConfig(Registrable):
@@ -191,8 +192,56 @@ def new_eval_on(task,model):
   results = {str(k): v for k, v in results.items()}
   print(json.dumps(results, indent=2))
 
+def save_example_output(examples,predictions,file_name):
+   coco_file = '/shared/rsaas/michal5/gpv_michal/exp/ours/data/coco_categories.json'
+   coco_entries = io.load_json_object(coco_file)
+   coco_id_to_category = {x["id"]: x["name"] for x in coco_entries}
+   coco_categories = list(coco_id_to_category.values())
+   coco_categories_to_id = {x["name"]:x["id"] for x in coco_entries}
+   #unseen_gpv_annotations = io.load_json_object(f'/data/michal5/gpv/learning_phase_data/coco_detection/{coco_annotation_name}/val.json')
+   coco_annotations = {'images':[],'annotations':[],'categories':[]}
+   images_processed = []
+   box_ids = 0
+   out = []
+   for i,ex in enumerate(examples):
+      results_box = []
+      pred = predictions[ex.gpv_id]
+      scores = pred.relevance
+      pred_boxes = pred.boxes.copy()
+      gt_boxes = np.array(ex.bboxes)
 
-def eval_on(args, run_dir, dataset, devices, skip_existing=False):
+      # Convert cx cy, w, h -> x1, y1, w, h
+      pred_boxes[:, 0] = pred_boxes[:, 0] - 0.5 * pred_boxes[:, 2]
+      pred_boxes[:, 1] = pred_boxes[:, 1] - 0.5 * pred_boxes[:, 3]
+
+      B = pred_boxes.shape[0]
+      out.extend(
+        [
+            {'image_id':float(ex.image_id),
+            'category_id':coco_categories_to_id[ex.category],
+            'bbox': pred_boxes[b],
+            'score': scores[b]
+            
+            }
+            for b in range(B)
+
+        ]
+      )
+      
+
+      # for b in range(B):
+      #   box_dict = {}
+      #   x, y, w, h = pred_boxes[b]
+      #   box_dict['image_id'] = ex.image_id 
+      #   box_dict['category_id'] = coco_categories_to_id[ex.category]
+      #   box_dict['bbox'] = [x,y,w,h]
+      #   box_dict['score'] = scores[b]
+      #   results_box.append(box_dict)
+      # out.append(results_box)
+   io.dump_json_object(out,f'/data/michal5/gpv/learning_phase_data/coco_detection/{file_name}.json')
+   return out 
+
+def eval_on(args, run_dir, dataset, devices, result_name,eval_type='gpv',skip_existing=False):
   #if args.output_dir:
   output_dir = 'image_contrast_normal_full_3'
 
@@ -229,7 +278,7 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
     #if not exists(output_dir):
      # os.mkdir(output_dir)
     #logging.info(f"Saving output to {output_dir}")
-
+  
   task = dataset.get_task()
 
   logging.info("Setting up...")
@@ -294,28 +343,58 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
   if args.dry_run:
     logging.info("Skipping running the model since this is a dry run")
     return
+  if eval_type != 'gpv':
+    if not os.path.exists(f'/data/michal5/gpv/learning_phase_data/coco_detection/{result_name}.json'):
+      output = run(
+        run_dir, examples, devices, batch_size, args.num_workers,
+        prediction_args, beams_to_keep=beams_to_keep)
+      final_results = save_example_output(examples,output,result_name)
+    evaluator, subsets = get_evaluator(dataset)
+    results = evaluator.evaluate_examples_coco(result_name)
+  else:
+    #final_results = io.load_json_object(f'/data/michal5/gpv/learning_phase_data/coco_detection/{result_name}.json')
 
-  output = run(
-    run_dir, examples, devices, batch_size, args.num_workers,
-    prediction_args, beams_to_keep=beams_to_keep)
+    if output_dir is not None:
+      logging.info(f"Saving output to {output_dir}")
+      #save_gpv_output(output, output_dir)
 
-  if output_dir is not None:
+      config = dict(
+        batch_size=batch_size,
+        num_workers=args.num_workers,
+        predictions_args=prediction_args_to_json(prediction_args),
+        dataset=to_params(dataset, Dataset),
+        beams_to_keep=beams_to_keep,
+        date=datetime.now().strftime("%m%d-%H%M%S"),
+      )
+
+      # with open(output_dir + "/config.json", "w") as f:
+      #   json.dump(config, f, indent=2)
+
+    if args.eval:
+      if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
+        logging.info("Skip evaluating since no labels OpenSce Captioning")
+        return
+      else:
+        logging.info("Evaluating...")
+
+      evaluator, subsets = get_evaluator(dataset)
+
+
     logging.info(f"Saving output to {output_dir}")
     #save_gpv_output(output, output_dir)
 
     config = dict(
-      batch_size=batch_size,
+      batch_size=args.batch_size,
       num_workers=args.num_workers,
       predictions_args=prediction_args_to_json(prediction_args),
       dataset=to_params(dataset, Dataset),
-      beams_to_keep=beams_to_keep,
       date=datetime.now().strftime("%m%d-%H%M%S"),
     )
 
     # with open(output_dir + "/config.json", "w") as f:
     #   json.dump(config, f, indent=2)
 
-  if args.eval:
+  
     if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
       logging.info("Skip evaluating since no labels OpenSce Captioning")
       return
@@ -323,42 +402,20 @@ def eval_on(args, run_dir, dataset, devices, skip_existing=False):
       logging.info("Evaluating...")
     evaluator, subsets = get_evaluator(dataset)
 
+    results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
+    #results = evaluator.evaluate(result_name)
 
-  logging.info(f"Saving output to {output_dir}")
-  #save_gpv_output(output, output_dir)
+    print(results,'results')
+    results[ResultKey("n", None)] = len(output)
+    logging.info(f"Caching evaluation to {output_dir}")
+    cache_evaluation(output_dir, evaluator, results)
 
-  config = dict(
-    batch_size=args.batch_size,
-    num_workers=args.num_workers,
-    predictions_args=prediction_args_to_json(prediction_args),
-    dataset=to_params(dataset, Dataset),
-    date=datetime.now().strftime("%m%d-%H%M%S"),
-  )
-
-  # with open(output_dir + "/config.json", "w") as f:
-  #   json.dump(config, f, indent=2)
-
- 
-  if isinstance(dataset, OpenSceDataset) and dataset.task == Task.CAPTIONING:
-    logging.info("Skip evaluating since no labels OpenSce Captioning")
-    return
-  else:
-    logging.info("Evaluating...")
-  evaluator, subsets = get_evaluator(dataset)
-
-  results = evaluator.evaluate(examples, output, allow_partial=True, subset_mapping=subsets)
-
-  print(results,'results')
-  results[ResultKey("n", None)] = len(output)
-  logging.info(f"Caching evaluation to {output_dir}")
-  cache_evaluation(output_dir, evaluator, results)
-
-  if task != Task.CAPTIONING:
-    factor = 100
-  else:
-    factor = 1
-  results = {str(k): v*factor for k, v in results.items()}
-  print(json.dumps(results, indent=2))
+    if task != Task.CAPTIONING:
+      factor = 100
+    else:
+      factor = 1
+    results = {str(k): v*factor for k, v in results.items()}
+    print(json.dumps(results, indent=2))
 
 
 def main():
@@ -389,6 +446,7 @@ def main():
   if args.output_dir and args.output_name:
     raise ValueError("Cannot specify output_name and output_dir")
   model_to_eval = 'outputs/seen_60_per_box_redo'
+  result_file_name = 'unseen_group_1_results_initial_redo'
   models = our_utils.find_models(model_to_eval)
   print(models)
   # if len(models) == 0:
@@ -403,7 +461,7 @@ def main():
   #model = models[0]
 
   datasets = get_datasets_from_args(args, model_to_eval)
-  eval_on(args,model_to_eval, datasets[0], devices, skip_existing=False)
+  eval_on(args,model_to_eval, datasets[0], devices,result_file_name, eval_type='coco',skip_existing=False)
   #   print(dataset.split_txt)
   #   dataset.change_split("gpv_split")
   #   if len(datasets) > 1:

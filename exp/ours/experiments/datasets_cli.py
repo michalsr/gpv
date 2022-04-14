@@ -94,7 +94,7 @@ def get_datasets_from_args(args, model_dir=None, sample=True, trained_on_sce=Non
   for task in gpv_tasks:
     for part in parts:
       #to_show += [GpvDataset(task, part, trained_on_sce, sample=sample)]
-      to_show += [GpvDataset(task, part, split_txt='seen_single_phrase',gpv_split=False)]
+      to_show += [GpvDataset(task, part, split_txt='unseen_group_1_single_phrase',gpv_split=False)]
   for task in open_sce_tasks:
     for part in parts:
       to_show += [OpenSceDataset(task, part, sample=sample)]
