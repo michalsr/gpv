@@ -902,6 +902,7 @@ class Trainer(FromParams):
     #create list of training examples 
   
     #print(self.train_datasets,len(self.train_datasets))
+  
     training_examples = [x.dataset.load() for x in self.train_datasets]
 
     total = sum(len(x) for x in training_examples)
@@ -1184,7 +1185,8 @@ class Trainer(FromParams):
       pbar = tqdm(train_loader,disable=not self.epoch_pbar,ncols=100,desc='loss=',total=len(train_loader))
       for i,batch in enumerate(pbar):
           #pdb.set_trace()
-
+          if i == 0:
+            break
           batch = our_utils.to_device(batch, device)
           loss, monitor = model(**batch)  
           monitor = _remove_tensors(monitor)
